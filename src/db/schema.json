@@ -1,0 +1,138 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "CryptoMarketPredictionPlatform_Schema_v2.2",
+  "description": "Production database schema adhering strictly to Game Rules v2.2 (PostgreSQL / Relational & Document mapped).",
+  "version": "2.2.0",
+  "timezone": "Europe/Amsterdam",
+  "tables": {
+    "users": {
+      "tableName": "users",
+      "description": "User profiles. Section 1: Real names private; public display name used across app.",
+      "columns": [
+        { "name": "id", "type": "UUID", "primaryKey": true, "required": true, "default": "gen_random_uuid()" },
+        { "name": "username", "type": "VARCHAR(50)", "unique": true, "required": true, "description": "Public display name for leaderboards, round chat, and profile." },
+        { "name": "first_name", "type": "VARCHAR(100)", "required": true, "description": "Private: Stored for prize claim & KYC only." },
+        { "name": "last_name", "type": "VARCHAR(100)", "required": true, "description": "Private: Stored for prize claim & KYC only." },
+        { "name": "email", "type": "VARCHAR(255)", "unique": true, "required": true },
+        { "name": "phone_number", "type": "VARCHAR(30)", "unique": true, "required": true },
+        { "name": "kyc_status", "type": "ENUM('UNVERIFIED', 'PENDING', 'VERIFIED', 'REJECTED')", "required": true, "default": "'UNVERIFIED'", "description": "Section 1: Required prior to receiving or withdrawing cash prizes." },
+        { "name": "kyc_document_type", "type": "VARCHAR(50)", "nullable": true },
+        { "name": "payout_wallet_address", "type": "VARCHAR(255)", "nullable": true, "description": "Verified IBAN or crypto wallet for cash payouts." },
+        { "name": "referral_code", "type": "VARCHAR(30)", "unique": true, "required": true },
+        { "name": "referred_by_user_id", "type": "UUID", "nullable": true, "foreignKey": { "table": "users", "column": "id" } },
+        { "name": "created_at", "type": "TIMESTAMPTZ", "required": true, "default": "NOW()" },
+        { "name": "updated_at", "type": "TIMESTAMPTZ", "required": true, "default": "NOW()" }
+      ],
+      "indexes": [
+        { "name": "idx_users_username", "columns": ["username"], "unique": true },
+        { "name": "idx_users_email", "columns": ["email"], "unique": true },
+        { "name": "idx_users_referral_code", "columns": ["referral_code"], "unique": true }
+      ]
+    },
+
+    "tokens": {
+      "tableName": "tokens",
+      "description": "User token balances and cycle tracking. Sections 3, 4, 21, 22.",
+      "columns": [
+        { "name": "id", "type": "UUID", "primaryKey": true, "required": true, "default": "gen_random_uuid()" },
+        { "name": "user_id", "type": "UUID", "required": true, "foreignKey": { "table": "users", "column": "id", "onDelete": "CASCADE" } },
+        { "name": "balance", "type": "INTEGER", "required": true, "default": 5, "description": "Section 3: 5 welcome tokens credited upon first login." },
+        { "name": "current_streak_day", "type": "SMALLINT", "required": true, "default": 1, "description": "Day in 7-day streak cycle (1 to 7). Grants Day 1: 1, ..., Day 7: 7 tokens." },
+        { "name": "last_prediction_date", "type": "DATE", "nullable": true, "description": "Used to verify >=1 daily prediction requirement to preserve streak (Section 22)." },
+        { "name": "last_daily_claim_at", "type": "TIMESTAMPTZ", "nullable": true, "description": "Tracks daily +2 token reward claim." },
+        { "name": "weekly_cycle_id", "type": "VARCHAR(20)", "required": true, "description": "Format YYYY-WW. Identifies current 7-day gaming cycle." },
+        { "name": "cycle_expires_at", "type": "TIMESTAMPTZ", "required": true, "description": "Section 22: Unused tokens reset/expire at beginning of next cycle." },
+        { "name": "updated_at", "type": "TIMESTAMPTZ", "required": true, "default": "NOW()" }
+      ],
+      "indexes": [
+        { "name": "idx_tokens_user_id", "columns": ["user_id"], "unique": true },
+        { "name": "idx_tokens_weekly_cycle", "columns": ["weekly_cycle_id"] }
+      ]
+    },
+
+    "token_transactions": {
+      "tableName": "token_transactions",
+      "description": "Immutable ledger of all token credits and consumptions.",
+      "columns": [
+        { "name": "id", "type": "UUID", "primaryKey": true, "required": true, "default": "gen_random_uuid()" },
+        { "name": "user_id", "type": "UUID", "required": true, "foreignKey": { "table": "users", "column": "id" } },
+        { "name": "amount", "type": "INTEGER", "required": true, "description": "+ve for reward, -1 for prediction" },
+        { "name": "transaction_type", "type": "ENUM('WELCOME_BONUS', 'DAILY_BASE', 'STREAK_REWARD', 'REFERRAL_REWARD', 'PREDICTION_ENTRY', 'WEEKLY_RESET_EXPIRY')", "required": true },
+        { "name": "reference_id", "type": "VARCHAR(100)", "nullable": true, "description": "e.g. prediction_id or referral_user_id" },
+        { "name": "weekly_cycle_id", "type": "VARCHAR(20)", "required": true },
+        { "name": "created_at", "type": "TIMESTAMPTZ", "required": true, "default": "NOW()" }
+      ]
+    },
+
+    "rounds": {
+      "tableName": "rounds",
+      "description": "Daily tournament rounds adhering strictly to Europe/Amsterdam time boundaries. Sections 7, 10, 14, 15.",
+      "columns": [
+        { "name": "id", "type": "VARCHAR(30)", "primaryKey": true, "required": true, "description": "e.g. 'ROUND-20261011'" },
+        { "name": "asset_pair", "type": "VARCHAR(20)", "required": true, "default": "'BTC/USD'" },
+        { "name": "round_date", "type": "DATE", "required": true, "unique": true, "description": "Target competition date in Europe/Amsterdam." },
+        { "name": "open_time_amsterdam", "type": "TIMESTAMPTZ", "required": true, "description": "12:00:00 Europe/Amsterdam: Window opens." },
+        { "name": "lock_freeze_time_amsterdam", "type": "TIMESTAMPTZ", "required": true, "description": "20:00:00 Europe/Amsterdam: Round locks, settlement price frozen, submissions unmasked." },
+        { "name": "announcement_time_amsterdam", "type": "TIMESTAMPTZ", "required": true, "description": "22:00:00 Europe/Amsterdam: Official rankings and prizes published." },
+        { "name": "status", "type": "ENUM('SCHEDULED', 'OPEN', 'LOCKED_LIVE', 'ANNOUNCED', 'CANCELLED')", "required": true, "default": "'SCHEDULED'" },
+        { "name": "official_settlement_price", "type": "NUMERIC(14, 2)", "nullable": true, "description": "Section 14: Frozen median value of valid exchange quotes at exactly 20:00:00." },
+        { "name": "median_calculation_data", "type": "JSONB", "nullable": true, "description": "Quotes collected from Coinbase, Binance, Kraken at 20:00:00." },
+        { "name": "total_cash_prize_pool", "type": "NUMERIC(12, 2)", "required": true, "default": "30000.00" },
+        { "name": "audit_merkle_root", "type": "VARCHAR(66)", "nullable": true, "description": "Cryptographic commitment for reproducibility (Section 28)." },
+        { "name": "created_at", "type": "TIMESTAMPTZ", "required": true, "default": "NOW()" }
+      ],
+      "indexes": [
+        { "name": "idx_rounds_date", "columns": ["round_date"], "unique": true },
+        { "name": "idx_rounds_status", "columns": ["status"] }
+      ]
+    },
+
+    "predictions": {
+      "tableName": "predictions",
+      "description": "Section 5 & 6: Immutable user predictions. Cannot be edited, cancelled, or refunded.",
+      "columns": [
+        { "name": "id", "type": "UUID", "primaryKey": true, "required": true, "default": "gen_random_uuid()" },
+        { "name": "round_id", "type": "VARCHAR(30)", "required": true, "foreignKey": { "table": "rounds", "column": "id" } },
+        { "name": "user_id", "type": "UUID", "required": true, "foreignKey": { "table": "users", "column": "id" } },
+        { "name": "predicted_price", "type": "NUMERIC(14, 2)", "required": true, "description": "Section 5: Maximum 2 decimal places in asset currency (USD)." },
+        { "name": "submitted_at", "type": "TIMESTAMPTZ", "required": true, "default": "NOW()", "description": "High-precision timestamp." },
+        { "name": "submitted_timestamp_ms", "type": "BIGINT", "required": true, "description": "Section 18: Exact millisecond epoch used as tie-breaker for identical errors." },
+        { "name": "is_immutable", "type": "BOOLEAN", "required": true, "default": "TRUE", "description": "Section 6: Immutable by users and admins." },
+        { "name": "absolute_error", "type": "NUMERIC(14, 2)", "nullable": true, "description": "Section 16: |predicted_price - official_settlement_price| calculated post 20:00." },
+        { "name": "final_rank", "type": "INTEGER", "nullable": true, "description": "Section 17: Lowest to highest error, timestamp tie-breaker." },
+        { "name": "prize_reward_type", "type": "ENUM('CASH', 'NON_CASH', 'NONE')", "nullable": true, "description": "Section 19: Ranks 1-30 CASH, Ranks 31-100 NON_CASH." },
+        { "name": "prize_cash_amount", "type": "NUMERIC(12, 2)", "nullable": true, "description": "Sections 19 & 20: 100% of defined pool allocated." },
+        { "name": "prize_non_cash_description", "type": "TEXT", "nullable": true },
+        { "name": "prize_claimed_at", "type": "TIMESTAMPTZ", "nullable": true }
+      ],
+      "indexes": [
+        { "name": "idx_predictions_round_user", "columns": ["round_id", "user_id"] },
+        { "name": "idx_predictions_tiebreaker", "columns": ["round_id", "absolute_error", "submitted_timestamp_ms"] },
+        { "name": "idx_predictions_rank", "columns": ["round_id", "final_rank"] }
+      ]
+    }
+  },
+  "relationships": [
+    {
+      "parentTable": "users",
+      "childTable": "tokens",
+      "type": "ONE_TO_ONE",
+      "onDelete": "CASCADE"
+    },
+    {
+      "parentTable": "users",
+      "childTable": "predictions",
+      "type": "ONE_TO_MANY"
+    },
+    {
+      "parentTable": "rounds",
+      "childTable": "predictions",
+      "type": "ONE_TO_MANY"
+    },
+    {
+      "parentTable": "users",
+      "childTable": "token_transactions",
+      "type": "ONE_TO_MANY"
+    }
+  ]
+}

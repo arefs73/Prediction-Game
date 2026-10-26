@@ -1,0 +1,6 @@
+{
+  "name": "ApexPredict - Bitcoin Market Prediction Platform",
+  "description": "Official daily crypto prediction platform following Game Rules v2.2 with multi-exchange median settlement at 20:00 Europe/Amsterdam.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
