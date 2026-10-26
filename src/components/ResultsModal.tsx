@@ -10,7 +10,7 @@ interface ResultsModalProps {
   clock: AmsterdamClockDetails;
   officialSettlementPrice: number;
   rankedPredictions: RankedPrediction[];
-  currentUser: UserProfile;
+  currentUser: UserProfile | null;
   totalCashPool: number;
   onStartKycClaim: () => void;
 }
@@ -31,7 +31,9 @@ export const ResultsModal: React.FC<ResultsModalProps> = ({
   if (!isOpen) return null;
 
   // Find current user's prediction result
-  const myResult = rankedPredictions.find((p) => p.userId === currentUser.id);
+  const myResult = currentUser
+    ? rankedPredictions.find((p) => p.userId === currentUser.id)
+    : undefined;
 
   // Top 100 leaderboard
   const top100 = rankedPredictions.slice(0, 100);
@@ -207,7 +209,7 @@ export const ResultsModal: React.FC<ResultsModalProps> = ({
 
               <div className="divide-y divide-slate-800 border border-slate-800 rounded-xl overflow-hidden bg-slate-950 max-h-[380px] overflow-y-auto">
                 {top100.map((entry) => {
-                  const isMe = entry.userId === currentUser.id;
+                  const isMe = currentUser ? entry.userId === currentUser.id : false;
                   const isCashWinner = entry.rank <= 30;
 
                   return (

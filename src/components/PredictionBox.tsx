@@ -1,20 +1,25 @@
 import React, { useState } from 'react';
 import { UserProfile } from '../types/game';
 import { AmsterdamClockDetails, formatUSD } from '../utils/amsterdamTime';
-import { AlertTriangle, CheckCircle2, Coins, Lock, Sparkles, X } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, Coins, Lock, LogIn, Sparkles, X } from 'lucide-react';
+import { AuthModalMode } from './AuthModal';
 
 interface PredictionBoxProps {
   currentSpotPrice: number;
   clock: AmsterdamClockDetails;
-  user: UserProfile;
+  user: UserProfile | null;
+  unverifiedEmail?: string | null;
   onSubmitPrediction: (price: number) => { success: boolean; error?: string };
+  onOpenAuth: (mode: AuthModalMode) => void;
 }
 
 export const PredictionBox: React.FC<PredictionBoxProps> = ({
   currentSpotPrice,
   clock,
   user,
+  unverifiedEmail,
   onSubmitPrediction,
+  onOpenAuth,
 }) => {
   const [inputValue, setInputValue] = useState<string>('');
   const [showConfirmModal, setShowConfirmModal] = useState<boolean>(false);
@@ -26,13 +31,11 @@ export const PredictionBox: React.FC<PredictionBoxProps> = ({
     const val = e.target.value;
     setInputError(null);
 
-    // Allow empty
     if (val === '') {
       setInputValue('');
       return;
     }
 
-    // Match numbers with up to 2 decimal places
     const regex = /^\d*(\.\d{0,2})?$/;
     if (regex.test(val)) {
       setInputValue(val);
@@ -42,6 +45,11 @@ export const PredictionBox: React.FC<PredictionBoxProps> = ({
   const handlePreSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     setInputError(null);
+
+    if (!user) {
+      onOpenAuth('login');
+      return;
+    }
 
     if (clock.phase !== 'OPEN') {
       setInputError('Prediction window is currently closed. Predictions are accepted 12:00 to 20:00 Amsterdam time.');
@@ -120,7 +128,7 @@ export const PredictionBox: React.FC<PredictionBoxProps> = ({
               value={inputValue}
               onChange={handleInputChange}
               disabled={!isWindowOpen}
-              placeholder={currentSpotPrice ? currentSpotPrice.toFixed(2) : "64800.00"}
+              placeholder={currentSpotPrice ? currentSpotPrice.toFixed(2) : '64800.00'}
               className="w-full pl-8 pr-28 py-3 rounded-xl bg-slate-950 border border-slate-700/80 focus:border-cyan-400 focus:ring-1 focus:ring-cyan-400 text-lg font-mono font-bold text-white tracking-wide placeholder:text-slate-600 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
             />
             <div className="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none">
@@ -161,36 +169,62 @@ export const PredictionBox: React.FC<PredictionBoxProps> = ({
 
         {/* Submit Button matching wireframe */}
         <div className="flex items-center gap-3">
-          <button
-            type="submit"
-            disabled={!isWindowOpen || !inputValue || user.tokenBalance < 1}
-            className="flex-1 py-3 px-6 rounded-xl bg-gradient-to-r from-cyan-500 via-teal-400 to-emerald-500 hover:from-cyan-400 hover:to-emerald-400 disabled:from-slate-800 disabled:to-slate-800 disabled:text-slate-500 text-slate-950 font-extrabold text-sm tracking-wide shadow-lg shadow-teal-500/20 hover:shadow-teal-500/30 transition-all cursor-pointer disabled:cursor-not-allowed flex items-center justify-center gap-2"
-          >
-            {isWindowOpen ? (
-              <>
-                <Sparkles className="w-4 h-4 text-slate-950" />
-                <span>Submit Prediction (Costs 1 Token)</span>
-              </>
-            ) : (
-              <>
-                <Lock className="w-4 h-4 text-slate-500" />
-                <span>Prediction Window Closed ({clock.phaseLabel})</span>
-              </>
-            )}
-          </button>
+          {!user && unverifiedEmail ? (
+            <button
+              type="button"
+              onClick={() => onOpenAuth('verify_email')}
+              className="flex-1 py-3 px-6 rounded-xl bg-gradient-to-r from-amber-500 via-amber-400 to-emerald-500 hover:from-amber-400 hover:to-emerald-400 text-slate-950 font-extrabold text-sm tracking-wide shadow-lg shadow-amber-500/20 transition-all cursor-pointer flex items-center justify-center gap-2"
+            >
+              <Lock className="w-4 h-4 text-slate-950" />
+              <span>Verify Email ({unverifiedEmail}) to Claim 5 Tokens & Predict</span>
+            </button>
+          ) : !user ? (
+            <button
+              type="button"
+              onClick={() => onOpenAuth('login')}
+              className="flex-1 py-3 px-6 rounded-xl bg-gradient-to-r from-cyan-500 via-teal-400 to-emerald-500 hover:from-cyan-400 hover:to-emerald-400 text-slate-950 font-extrabold text-sm tracking-wide shadow-lg shadow-teal-500/20 hover:shadow-teal-500/30 transition-all cursor-pointer flex items-center justify-center gap-2"
+            >
+              <LogIn className="w-4 h-4 text-slate-950" />
+              <span>Log In or Create Account to Predict (+5 Free Tokens)</span>
+            </button>
+          ) : (
+            <button
+              type="submit"
+              disabled={!isWindowOpen || !inputValue || user.tokenBalance < 1}
+              className="flex-1 py-3 px-6 rounded-xl bg-gradient-to-r from-cyan-500 via-teal-400 to-emerald-500 hover:from-cyan-400 hover:to-emerald-400 disabled:from-slate-800 disabled:to-slate-800 disabled:text-slate-500 text-slate-950 font-extrabold text-sm tracking-wide shadow-lg shadow-teal-500/20 hover:shadow-teal-500/30 transition-all cursor-pointer disabled:cursor-not-allowed flex items-center justify-center gap-2"
+            >
+              {isWindowOpen ? (
+                <>
+                  <Sparkles className="w-4 h-4 text-slate-950" />
+                  <span>Submit Prediction (Costs 1 Token)</span>
+                </>
+              ) : (
+                <>
+                  <Lock className="w-4 h-4 text-slate-500" />
+                  <span>Prediction Window Closed ({clock.phaseLabel})</span>
+                </>
+              )}
+            </button>
+          )}
         </div>
 
         <div className="flex items-center justify-between text-[11px] text-slate-500 pt-1">
           <span className="flex items-center gap-1">
             <Coins className="w-3.5 h-3.5 text-amber-400" />
-            Balance: <strong className="text-slate-300">{user.tokenBalance} Tokens</strong>
+            {user ? (
+              <>
+                Balance: <strong className="text-slate-300">{user.tokenBalance} Tokens</strong>
+              </>
+            ) : (
+              <span className="text-slate-400">New accounts receive 5 Free Welcome Tokens</span>
+            )}
           </span>
           <span>Core Rule: 1 Token = 1 Independent Guess</span>
         </div>
       </form>
 
       {/* Confirmation Screen per Game Rules Section 5 & 6 */}
-      {showConfirmModal && (
+      {showConfirmModal && user && (
         <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-slate-900 border border-slate-700 rounded-2xl max-w-md w-full p-6 shadow-2xl relative animate-in fade-in zoom-in-95 duration-150">
             <button

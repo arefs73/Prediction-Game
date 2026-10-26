@@ -1,0 +1,311 @@
+{
+  "entities": {
+    "UserPrivateProfile": {
+      "title": "UserPrivateProfile",
+      "description": "Private user account profile containing confidential identity fields (first/last name, email, phone), token balance, streak state, and KYC status per Game Rules v2.2 Section 1.",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "description": "Firebase Auth UID of the account owner",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "username": {
+          "type": "string",
+          "description": "Public display name shown on leaderboards and chat",
+          "minLength": 3,
+          "maxLength": 30,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "firstName": {
+          "type": "string",
+          "description": "Private legal first name",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "lastName": {
+          "type": "string",
+          "description": "Private legal last name",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "email": {
+          "type": "string",
+          "format": "email",
+          "description": "Private email address",
+          "minLength": 3,
+          "maxLength": 150
+        },
+        "phone": {
+          "type": "string",
+          "description": "Private phone number",
+          "minLength": 5,
+          "maxLength": 30
+        },
+        "tokenBalance": {
+          "type": "number",
+          "description": "Current prediction token balance (5 welcome tokens on signup)"
+        },
+        "streakDay": {
+          "type": "number",
+          "description": "Current day in the 7-day retention streak cycle (1 to 7)"
+        },
+        "streakClaimedToday": {
+          "type": "boolean",
+          "description": "Whether the daily base reward was claimed today"
+        },
+        "lastPredictionDate": {
+          "type": "string",
+          "description": "YYYY-MM-DD date of last submitted prediction in Europe/Amsterdam",
+          "maxLength": 20
+        },
+        "gamingCycleWeek": {
+          "type": "number",
+          "description": "Current weekly gaming cycle identifier"
+        },
+        "kycStatus": {
+          "type": "string",
+          "enum": ["UNVERIFIED", "PENDING", "VERIFIED"],
+          "description": "Identity verification status for cash prize claims",
+          "maxLength": 20
+        },
+        "kycDocumentType": {
+          "type": "string",
+          "description": "Document type submitted for KYC",
+          "maxLength": 60
+        },
+        "walletAddress": {
+          "type": "string",
+          "description": "Verified payout IBAN or wallet address",
+          "maxLength": 120
+        },
+        "referralCode": {
+          "type": "string",
+          "description": "Unique referral code for inviting participants",
+          "minLength": 3,
+          "maxLength": 32,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "referredByCode": {
+          "type": "string",
+          "description": "Optional referral code used during registration",
+          "maxLength": 32
+        },
+        "referralCount": {
+          "type": "number",
+          "description": "Number of verified referrals who submitted a prediction"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server creation timestamp"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server update timestamp"
+        }
+      },
+      "required": [
+        "userId",
+        "username",
+        "firstName",
+        "lastName",
+        "email",
+        "phone",
+        "tokenBalance",
+        "streakDay",
+        "streakClaimedToday",
+        "gamingCycleWeek",
+        "kycStatus",
+        "referralCode",
+        "referralCount",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "PublicUserProfile": {
+      "title": "PublicUserProfile",
+      "description": "Isolated non-PII public profile displaying only username and avatar.",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "description": "Firebase Auth UID",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "username": {
+          "type": "string",
+          "description": "Public display name",
+          "minLength": 3,
+          "maxLength": 30,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "avatarUrl": {
+          "type": "string",
+          "description": "Optional avatar URL",
+          "maxLength": 500
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server creation timestamp"
+        }
+      },
+      "required": ["userId", "username", "createdAt"]
+    },
+    "Prediction": {
+      "title": "Prediction",
+      "description": "Immutable daily BTC price prediction entry per Game Rules v2.2 Section 5 & 6.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique prediction ID",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "userId": {
+          "type": "string",
+          "description": "UID of the submitting participant",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "username": {
+          "type": "string",
+          "description": "Public display name of participant",
+          "minLength": 3,
+          "maxLength": 30
+        },
+        "avatarUrl": {
+          "type": "string",
+          "description": "Participant avatar URL",
+          "maxLength": 500
+        },
+        "predictedPrice": {
+          "type": "number",
+          "description": "Predicted asset price at 20:00:00 Europe/Amsterdam (max 2 decimals)"
+        },
+        "submittedAt": {
+          "type": "string",
+          "description": "ISO timestamp string",
+          "maxLength": 40
+        },
+        "submittedTimestamp": {
+          "type": "number",
+          "description": "Epoch milliseconds for deterministic tie-breaking"
+        },
+        "roundId": {
+          "type": "string",
+          "description": "Daily round identifier (e.g., round_20261026)",
+          "minLength": 1,
+          "maxLength": 40,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp"
+        }
+      },
+      "required": [
+        "id",
+        "userId",
+        "username",
+        "predictedPrice",
+        "submittedAt",
+        "submittedTimestamp",
+        "roundId",
+        "createdAt"
+      ]
+    },
+    "ChatMessage": {
+      "title": "ChatMessage",
+      "description": "Global round chat message per Game Rules v2.2 Section 25.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Message ID",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "userId": {
+          "type": "string",
+          "description": "Sender UID",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "username": {
+          "type": "string",
+          "description": "Sender public display name",
+          "minLength": 3,
+          "maxLength": 30
+        },
+        "avatarUrl": {
+          "type": "string",
+          "description": "Sender avatar URL",
+          "maxLength": 500
+        },
+        "message": {
+          "type": "string",
+          "description": "Sanitized chat text (max 280 chars, no external URLs)",
+          "minLength": 1,
+          "maxLength": 280
+        },
+        "timestamp": {
+          "type": "string",
+          "description": "Formatted HH:mm display time",
+          "maxLength": 16
+        },
+        "roundId": {
+          "type": "string",
+          "description": "Round identifier",
+          "minLength": 1,
+          "maxLength": 40,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server creation timestamp"
+        }
+      },
+      "required": [
+        "id",
+        "userId",
+        "username",
+        "message",
+        "timestamp",
+        "roundId",
+        "createdAt"
+      ]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "UserPrivateProfile",
+      "description": "Private user account documents strictly isolated to the account owner."
+    },
+    "/publicProfiles/{userId}": {
+      "schema": "PublicUserProfile",
+      "description": "Public display name directory."
+    },
+    "/predictions/{predictionId}": {
+      "schema": "Prediction",
+      "description": "Immutable daily price predictions."
+    },
+    "/chatMessages/{messageId}": {
+      "schema": "ChatMessage",
+      "description": "Global round chat messages."
+    }
+  }
+}

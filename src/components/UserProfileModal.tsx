@@ -1,6 +1,24 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { UserProfile } from '../types/game';
-import { CheckCircle2, Coins, Copy, Flame, Lock, ShieldCheck, Sparkles, User, Users, X } from 'lucide-react';
+import { changeAccountPassword, deleteCurrentUserAccount } from '../services/authService';
+import { auth } from '../services/firebase';
+import {
+  AlertCircle,
+  AlertTriangle,
+  CheckCircle2,
+  Coins,
+  Copy,
+  Edit3,
+  Flame,
+  KeyRound,
+  Lock,
+  LogOut,
+  Save,
+  ShieldCheck,
+  Trash2,
+  Users,
+  X,
+} from 'lucide-react';
 
 interface UserProfileModalProps {
   isOpen: boolean;
@@ -8,6 +26,8 @@ interface UserProfileModalProps {
   user: UserProfile;
   onUpdateUser: (updated: Partial<UserProfile>) => void;
   onClaimDailyTokens: () => void;
+  onLogout: () => void;
+  onAccountDeleted: (deletedUsername: string) => void;
 }
 
 export const UserProfileModal: React.FC<UserProfileModalProps> = ({
@@ -16,13 +36,58 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
   user,
   onUpdateUser,
   onClaimDailyTokens,
+  onLogout,
+  onAccountDeleted,
 }) => {
-  const [activeTab, setActiveTab] = useState<'profile' | 'streak' | 'referrals' | 'kyc'>('profile');
+  const [activeTab, setActiveTab] = useState<'profile' | 'security' | 'streak' | 'referrals' | 'kyc'>('profile');
   const [copiedReferral, setCopiedReferral] = useState(false);
-  const [kycDoc, setKycDoc] = useState('Passport / National ID');
-  const [kycSuccess, setKycSuccess] = useState(false);
+  const [kycDoc, setKycDoc] = useState(user.kycDocumentType || 'EU Passport');
+  const [walletAddr, setWalletAddr] = useState(user.walletAddress || 'NL91 ABNA 0417 1643 00');
+
+  // Edit profile state
+  const [isEditingProfile, setIsEditingProfile] = useState(false);
+  const [editUsername, setEditUsername] = useState(user.username);
+  const [editFirstName, setEditFirstName] = useState(user.firstName);
+  const [editLastName, setEditLastName] = useState(user.lastName);
+  const [editPhone, setEditPhone] = useState(user.phone);
+  const [profileFeedback, setProfileFeedback] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
+  // Change password state
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmNewPassword, setConfirmNewPassword] = useState('');
+  const [pwdFeedback, setPwdFeedback] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
+  // Delete Account Verification Modal state
+  const [isDeleteConfirmOpen, setIsDeleteConfirmOpen] = useState(false);
+  const [deleteConfirmText, setDeleteConfirmText] = useState('');
+  const [deletePassword, setDeletePassword] = useState('');
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+
+  useEffect(() => {
+    setEditUsername(user.username);
+    setEditFirstName(user.firstName);
+    setEditLastName(user.lastName);
+    setEditPhone(user.phone);
+  }, [user]);
+
+  useEffect(() => {
+    if (!isOpen) {
+      setIsDeleteConfirmOpen(false);
+      setDeleteConfirmText('');
+      setDeletePassword('');
+      setDeleteError(null);
+    }
+  }, [isOpen]);
 
   if (!isOpen) return null;
+
+  const isGoogleOnlyUser =
+    auth.currentUser &&
+    auth.currentUser.uid === user.id &&
+    auth.currentUser.providerData.some((p) => p.providerId === 'google.com') &&
+    !auth.currentUser.providerData.some((p) => p.providerId === 'password');
 
   const referralLink = `https://apexpredict.io/ref/${user.referralCode}`;
 
@@ -32,13 +97,92 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
     setTimeout(() => setCopiedReferral(false), 3000);
   };
 
+  const handleSaveProfileEdit = (e: React.FormEvent) => {
+    e.preventDefault();
+    setProfileFeedback(null);
+
+    const cleanUser = editUsername.trim();
+    if (!/^[a-zA-Z0-9_-]{3,30}$/.test(cleanUser)) {
+      setProfileFeedback({
+        type: 'error',
+        text: 'Public Display Name must be 3–30 characters (letters, numbers, underscores, hyphens).',
+      });
+      return;
+    }
+
+    onUpdateUser({
+      username: cleanUser,
+      firstName: editFirstName.trim() || user.firstName,
+      lastName: editLastName.trim() || user.lastName,
+      phone: editPhone.trim() || user.phone,
+    });
+
+    setIsEditingProfile(false);
+    setProfileFeedback({ type: 'success', text: 'Account profile details saved.' });
+    setTimeout(() => setProfileFeedback(null), 4000);
+  };
+
+  const handlePasswordChangeSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setPwdFeedback(null);
+
+    if (newPassword !== confirmNewPassword) {
+      setPwdFeedback({ type: 'error', text: 'New password and confirmation do not match.' });
+      return;
+    }
+
+    const res = await changeAccountPassword(user.id, currentPassword, newPassword);
+    if (!res.success) {
+      setPwdFeedback({ type: 'error', text: res.error || 'Could not update password.' });
+      return;
+    }
+
+    setCurrentPassword('');
+    setNewPassword('');
+    setConfirmNewPassword('');
+    setPwdFeedback({ type: 'success', text: 'Your password has been updated.' });
+  };
+
   const handleKycSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     onUpdateUser({
       kycStatus: 'VERIFIED',
       kycDocumentType: kycDoc,
+      walletAddress: walletAddr,
     });
-    setKycSuccess(true);
+  };
+
+  const openDeleteVerificationDialog = () => {
+    setDeleteConfirmText('');
+    setDeletePassword('');
+    setDeleteError(null);
+    setIsDeleteConfirmOpen(true);
+  };
+
+  const handleVerifiedDeleteAccount = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setDeleteError(null);
+    setIsDeleting(true);
+
+    try {
+      const res = await deleteCurrentUserAccount({
+        user,
+        confirmationText: deleteConfirmText,
+        password: deletePassword,
+      });
+
+      if (!res.success) {
+        setDeleteError(res.error || 'Account deletion failed. Please verify your details.');
+        return;
+      }
+
+      const deletedName = user.username;
+      setIsDeleteConfirmOpen(false);
+      onClose();
+      onAccountDeleted(deletedName);
+    } finally {
+      setIsDeleting(false);
+    }
   };
 
   return (
@@ -51,26 +195,42 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
           <X className="w-5 h-5" />
         </button>
 
-        {/* User Card Header */}
-        <div className="flex items-center gap-4 pb-4 border-b border-slate-800">
-          <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-cyan-500 to-blue-600 flex items-center justify-center text-slate-950 font-black text-xl shadow-lg shadow-cyan-500/20">
-            {user.username.slice(0, 2).toUpperCase()}
-          </div>
-          <div>
-            <div className="flex items-center gap-2">
-              <h2 className="text-xl font-bold text-white">{user.username}</h2>
-              <span className="text-[10px] font-mono text-cyan-400 bg-cyan-950/70 border border-cyan-800/60 px-2 py-0.5 rounded font-semibold">
-                Official Participant
-              </span>
+        {/* User Card Header (shown immediately when clicking user's name) */}
+        <div className="flex flex-wrap items-center justify-between gap-4 pb-4 border-b border-slate-800 pr-8">
+          <div className="flex items-center gap-4">
+            <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-cyan-500 to-blue-600 flex items-center justify-center text-slate-950 font-black text-xl shadow-lg shadow-cyan-500/20">
+              {user.username.slice(0, 2).toUpperCase()}
             </div>
-            <p className="text-xs text-slate-400 mt-0.5">
-              Real identity protected (Section 1) · Public Display Name active
-            </p>
+            <div>
+              <div className="flex items-center gap-2">
+                <h2 className="text-xl font-bold text-white">{user.username}</h2>
+                <span className="text-[10px] font-mono text-cyan-400 bg-cyan-950/70 border border-cyan-800/60 px-2 py-0.5 rounded font-semibold">
+                  Official Participant
+                </span>
+              </div>
+              <p className="text-xs text-slate-400 mt-0.5">
+                {user.email} · Real identity protected (Section 1)
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                onClose();
+                onLogout();
+              }}
+              className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-300 text-xs font-bold cursor-pointer transition-colors"
+            >
+              <LogOut className="w-3.5 h-3.5" />
+              <span>Log Out</span>
+            </button>
           </div>
         </div>
 
         {/* Modal Navigation */}
-        <div className="mt-4 flex border-b border-slate-800 text-xs font-semibold gap-6">
+        <div className="mt-4 flex flex-wrap border-b border-slate-800 text-xs font-semibold gap-5">
           <button
             onClick={() => setActiveTab('profile')}
             className={`pb-2.5 transition-colors cursor-pointer ${
@@ -79,7 +239,17 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
                 : 'text-slate-400 hover:text-slate-200'
             }`}
           >
-            Account & Tokens
+            Account & Profile
+          </button>
+          <button
+            onClick={() => setActiveTab('security')}
+            className={`pb-2.5 transition-colors cursor-pointer ${
+              activeTab === 'security'
+                ? 'text-cyan-400 border-b-2 border-cyan-400 font-bold'
+                : 'text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            Password & Security
           </button>
           <button
             onClick={() => setActiveTab('streak')}
@@ -89,7 +259,7 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
                 : 'text-slate-400 hover:text-slate-200'
             }`}
           >
-            Daily Streak (Day {user.streakDay}/7)
+            Daily Streak ({user.streakDay}/7)
           </button>
           <button
             onClick={() => setActiveTab('referrals')}
@@ -99,7 +269,7 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
                 : 'text-slate-400 hover:text-slate-200'
             }`}
           >
-            Referrals (5 Tokens)
+            Referrals (+5 Tokens)
           </button>
           <button
             onClick={() => setActiveTab('kyc')}
@@ -109,7 +279,7 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
                 : 'text-slate-400 hover:text-slate-200'
             }`}
           >
-            Cash Prize KYC ({user.kycStatus})
+            Prize Claim KYC ({user.kycStatus})
           </button>
         </div>
 
@@ -117,6 +287,23 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
           {/* TAB 1: Profile & Tokens */}
           {activeTab === 'profile' && (
             <div className="space-y-4 text-xs">
+              {profileFeedback && (
+                <div
+                  className={`p-3 rounded-xl border flex items-center gap-2 ${
+                    profileFeedback.type === 'success'
+                      ? 'bg-emerald-950/50 border-emerald-800 text-emerald-300'
+                      : 'bg-rose-950/50 border-rose-800 text-rose-300'
+                  }`}
+                >
+                  {profileFeedback.type === 'success' ? (
+                    <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                  ) : (
+                    <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
+                  )}
+                  <span>{profileFeedback.text}</span>
+                </div>
+              )}
+
               <div className="grid grid-cols-2 gap-3">
                 <div className="p-3 bg-slate-950 rounded-xl border border-slate-800">
                   <span className="text-[10px] text-slate-500 uppercase block mb-1">Available Tokens</span>
@@ -144,23 +331,114 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
                 </div>
               </div>
 
-              {/* Private Fields Information per Section 1 */}
-              <div className="p-4 bg-slate-950/80 rounded-xl border border-slate-800 space-y-2">
+              {/* Private Fields Information & Edit Form per Section 1 */}
+              <div className="p-4 bg-slate-950/80 rounded-xl border border-slate-800 space-y-3">
                 <div className="flex items-center justify-between text-slate-300 font-semibold pb-2 border-b border-slate-800/80">
                   <span className="flex items-center gap-1.5">
                     <Lock className="w-3.5 h-3.5 text-cyan-400" />
-                    Confidential Participant Identity (Section 1)
+                    Participant Identity & Display Name (Section 1)
                   </span>
-                  <span className="text-[10px] text-emerald-400 font-mono">Private to System</span>
+                  <button
+                    type="button"
+                    onClick={() => setIsEditingProfile(!isEditingProfile)}
+                    className="flex items-center gap-1 text-[11px] text-cyan-400 hover:text-cyan-300 cursor-pointer"
+                  >
+                    <Edit3 className="w-3 h-3" />
+                    <span>{isEditingProfile ? 'Cancel Edit' : 'Edit Profile'}</span>
+                  </button>
                 </div>
-                <div className="grid grid-cols-2 gap-2 text-slate-400 text-[11px]">
-                  <div>First Name: <strong className="text-white">{user.firstName}</strong></div>
-                  <div>Last Name: <strong className="text-white">{user.lastName}</strong></div>
-                  <div>Email: <strong className="text-white">{user.email}</strong></div>
-                  <div>Phone: <strong className="text-white">{user.phone}</strong></div>
-                </div>
+
+                {!isEditingProfile ? (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 text-slate-400 text-[11px]">
+                    <div>
+                      Public Display Name:{' '}
+                      <strong className="text-cyan-300 font-mono">{user.username}</strong>
+                    </div>
+                    <div>
+                      Email Address: <strong className="text-white">{user.email}</strong>
+                    </div>
+                    <div>
+                      First Name (Private): <strong className="text-white">{user.firstName}</strong>
+                    </div>
+                    <div>
+                      Last Name (Private): <strong className="text-white">{user.lastName}</strong>
+                    </div>
+                    <div>
+                      Phone Number (Private):{' '}
+                      <strong className="text-white font-mono">{user.phone}</strong>
+                    </div>
+                    <div>
+                      Participant UID:{' '}
+                      <strong className="text-slate-300 font-mono">{user.id.slice(0, 14)}</strong>
+                    </div>
+                  </div>
+                ) : (
+                  <form onSubmit={handleSaveProfileEdit} className="space-y-3 pt-1">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-slate-400 text-[11px] mb-1">
+                          Public Display Name / Username
+                        </label>
+                        <input
+                          type="text"
+                          required
+                          value={editUsername}
+                          onChange={(e) => setEditUsername(e.target.value)}
+                          className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-700 text-white font-mono"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-slate-400 text-[11px] mb-1">
+                          Phone Number (Private)
+                        </label>
+                        <input
+                          type="tel"
+                          required
+                          value={editPhone}
+                          onChange={(e) => setEditPhone(e.target.value)}
+                          className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-700 text-white font-mono"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-slate-400 text-[11px] mb-1">
+                          Legal First Name (Private)
+                        </label>
+                        <input
+                          type="text"
+                          required
+                          value={editFirstName}
+                          onChange={(e) => setEditFirstName(e.target.value)}
+                          className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-700 text-white"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-slate-400 text-[11px] mb-1">
+                          Legal Last Name (Private)
+                        </label>
+                        <input
+                          type="text"
+                          required
+                          value={editLastName}
+                          onChange={(e) => setEditLastName(e.target.value)}
+                          className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-700 text-white"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="flex justify-end gap-2">
+                      <button
+                        type="submit"
+                        className="px-4 py-2 rounded-lg bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold text-xs flex items-center gap-1.5 cursor-pointer"
+                      >
+                        <Save className="w-3.5 h-3.5" />
+                        <span>Save Profile Changes</span>
+                      </button>
+                    </div>
+                  </form>
+                )}
+
                 <p className="text-[10px] text-slate-500 pt-1">
-                  Your first and last name remain strictly private. Only your Display Name (<strong>{user.username}</strong>) is shown on leaderboards and chat.
+                  Your legal first and last name remain strictly private in the system. Only your Display Name (<strong>{user.username}</strong>) is shown publicly on leaderboards and chat.
                 </p>
               </div>
 
@@ -178,10 +456,121 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
                   {user.streakClaimedToday ? 'Claimed Today' : 'Claim +2 Tokens'}
                 </button>
               </div>
+
+              {/* Danger Zone: Delete Account */}
+              <div className="p-3.5 rounded-xl bg-rose-950/30 border border-rose-800/50 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div>
+                  <div className="font-bold text-rose-300 flex items-center gap-1.5">
+                    <Trash2 className="w-3.5 h-3.5 text-rose-400" />
+                    <span>Delete Participant Account</span>
+                  </div>
+                  <div className="text-[11px] text-slate-400 mt-0.5">
+                    Permanently remove your profile, personal data, and remaining token balance. Verification required.
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={openDeleteVerificationDialog}
+                  className="px-4 py-2 rounded-xl bg-rose-600/20 hover:bg-rose-600/35 border border-rose-500/50 text-rose-200 font-bold text-xs cursor-pointer transition-colors whitespace-nowrap"
+                >
+                  Delete Account...
+                </button>
+              </div>
             </div>
           )}
 
-          {/* TAB 2: Daily Streak (Section 21 & 22) */}
+          {/* TAB 2: Password & Security */}
+          {activeTab === 'security' && (
+            <div className="space-y-4 text-xs">
+              <div className="p-4 bg-slate-950 rounded-xl border border-slate-800 space-y-3">
+                <div className="font-bold text-white flex items-center gap-1.5">
+                  <KeyRound className="w-4 h-4 text-cyan-400" />
+                  <span>Change Account Password</span>
+                </div>
+
+                {pwdFeedback && (
+                  <div
+                    className={`p-3 rounded-xl border flex items-center gap-2 ${
+                      pwdFeedback.type === 'success'
+                        ? 'bg-emerald-950/50 border-emerald-800 text-emerald-300'
+                        : 'bg-rose-950/50 border-rose-800 text-rose-300'
+                    }`}
+                  >
+                    {pwdFeedback.type === 'success' ? (
+                      <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                    ) : (
+                      <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
+                    )}
+                    <span>{pwdFeedback.text}</span>
+                  </div>
+                )}
+
+                <form onSubmit={handlePasswordChangeSubmit} className="space-y-3">
+                  <div>
+                    <label className="block text-slate-400 mb-1">Current Password</label>
+                    <input
+                      type="password"
+                      required
+                      value={currentPassword}
+                      onChange={(e) => setCurrentPassword(e.target.value)}
+                      placeholder="Enter current password"
+                      className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-800 text-white"
+                    />
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-slate-400 mb-1">New Password</label>
+                      <input
+                        type="password"
+                        required
+                        value={newPassword}
+                        onChange={(e) => setNewPassword(e.target.value)}
+                        placeholder="Min. 6 characters"
+                        className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-800 text-white"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-slate-400 mb-1">Confirm New Password</label>
+                      <input
+                        type="password"
+                        required
+                        value={confirmNewPassword}
+                        onChange={(e) => setConfirmNewPassword(e.target.value)}
+                        placeholder="Repeat new password"
+                        className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-800 text-white"
+                      />
+                    </div>
+                  </div>
+                  <button
+                    type="submit"
+                    className="px-4 py-2.5 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold text-xs cursor-pointer"
+                  >
+                    Update Password
+                  </button>
+                </form>
+              </div>
+
+              {/* Danger Zone in Security Tab */}
+              <div className="p-4 bg-rose-950/30 rounded-xl border border-rose-800/50 space-y-2.5">
+                <div className="font-bold text-rose-300 flex items-center gap-1.5">
+                  <Trash2 className="w-4 h-4 text-rose-400" />
+                  <span>Danger Zone — Permanent Account Deletion</span>
+                </div>
+                <p className="text-[11px] text-slate-400 leading-relaxed">
+                  Deleting your account permanently removes your private profile, public display name, and remaining prediction tokens ({user.tokenBalance} Tokens). You will be asked to verify your identity before deletion completes.
+                </p>
+                <button
+                  type="button"
+                  onClick={openDeleteVerificationDialog}
+                  className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs cursor-pointer transition-colors"
+                >
+                  Delete My Account
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* TAB 3: Daily Streak (Section 21 & 22) */}
           {activeTab === 'streak' && (
             <div className="space-y-4 text-xs">
               <div className="p-4 bg-slate-950 rounded-xl border border-slate-800 space-y-2">
@@ -198,7 +587,6 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
                   Submit at least one valid prediction during the day to preserve your streak. Day 1 gives 1 bonus token, scaling up to 7 bonus tokens on Day 7!
                 </p>
 
-                {/* 7 Day visual track */}
                 <div className="grid grid-cols-7 gap-1.5 pt-2">
                   {[1, 2, 3, 4, 5, 6, 7].map((day) => {
                     const isCompleted = day < user.streakDay;
@@ -224,7 +612,6 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
                 </div>
               </div>
 
-              {/* Section 22 Weekly Reset Rule */}
               <div className="p-3 rounded-xl bg-slate-950/80 border border-slate-800 text-[11px] text-slate-400 space-y-1">
                 <div className="font-semibold text-slate-200">
                   Weekly Token Reset Rule (Section 22)
@@ -236,7 +623,7 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
             </div>
           )}
 
-          {/* TAB 3: Referrals (Section 23 & 24) */}
+          {/* TAB 4: Referrals (Section 23 & 24) */}
           {activeTab === 'referrals' && (
             <div className="space-y-4 text-xs">
               <div className="p-4 bg-slate-950 rounded-xl border border-slate-800 space-y-3">
@@ -277,7 +664,7 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
             </div>
           )}
 
-          {/* TAB 4: Prize Claim KYC (Section 1) */}
+          {/* TAB 5: Prize Claim KYC (Section 1) */}
           {activeTab === 'kyc' && (
             <div className="space-y-4 text-xs">
               <div className="p-4 bg-slate-950 rounded-xl border border-slate-800 space-y-3">
@@ -304,7 +691,7 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
                 {user.kycStatus === 'VERIFIED' ? (
                   <div className="p-3 bg-emerald-950/40 border border-emerald-800/60 rounded-xl flex items-center gap-2 text-emerald-300">
                     <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-                    <span>Identity verified for cash prize disbursement. Payout destination active.</span>
+                    <span>Identity verified ({user.kycDocumentType || 'EU ID'}). Payout destination ({user.walletAddress || walletAddr}) active.</span>
                   </div>
                 ) : (
                   <form onSubmit={handleKycSubmit} className="space-y-3 pt-2">
@@ -329,7 +716,8 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
                       </label>
                       <input
                         type="text"
-                        defaultValue="NL91 ABNA 0417 1643 00"
+                        value={walletAddr}
+                        onChange={(e) => setWalletAddr(e.target.value)}
                         className="w-full bg-slate-900 border border-slate-800 rounded-xl p-2.5 text-xs font-mono text-white"
                       />
                     </div>
@@ -355,6 +743,122 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
             Close
           </button>
         </div>
+
+        {/* ================================================================ */}
+        {/* ACCOUNT DELETION VERIFICATION DIALOG */}
+        {/* ================================================================ */}
+        {isDeleteConfirmOpen && (
+          <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-4">
+            <div className="bg-[#111827] border border-rose-500/50 rounded-2xl max-w-md w-full p-6 shadow-2xl relative">
+              <button
+                type="button"
+                onClick={() => setIsDeleteConfirmOpen(false)}
+                className="absolute top-4 right-4 text-slate-400 hover:text-white cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+
+              <div className="flex items-center gap-3 mb-4">
+                <div className="w-11 h-11 rounded-xl bg-rose-500/20 border border-rose-500/40 flex items-center justify-center text-rose-400 shrink-0">
+                  <AlertTriangle className="w-6 h-6" />
+                </div>
+                <div>
+                  <h3 className="text-base font-extrabold text-white">
+                    Verify Permanent Account Deletion
+                  </h3>
+                  <p className="text-xs text-rose-300">
+                    This action is irreversible and cannot be undone
+                  </p>
+                </div>
+              </div>
+
+              {deleteError && (
+                <div className="mb-4 p-3 rounded-xl bg-rose-500/15 border border-rose-500/40 text-rose-200 text-xs flex items-start gap-2">
+                  <AlertCircle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+                  <span>{deleteError}</span>
+                </div>
+              )}
+
+              <form onSubmit={handleVerifiedDeleteAccount} className="space-y-4 text-xs">
+                <div className="p-3.5 rounded-xl bg-slate-950 border border-slate-800 text-slate-300 space-y-1.5 text-[11px] leading-relaxed">
+                  <p>
+                    You are about to permanently delete participant account{' '}
+                    <strong className="text-white font-mono">{user.username}</strong> ({user.email}).
+                  </p>
+                  <ul className="list-disc pl-4 text-slate-400 space-y-1">
+                    <li>
+                      Your private identity record, public profile, and{' '}
+                      <strong className="text-amber-300">{user.tokenBalance} Tokens</strong> will be permanently erased.
+                    </li>
+                    <li>
+                      Per Game Rules v2.2 Section 6, any predictions already locked into the active round ledger remain immutable.
+                    </li>
+                  </ul>
+                </div>
+
+                <div>
+                  <label className="block text-slate-300 font-semibold mb-1.5">
+                    Step 1: Type <span className="font-mono text-rose-300 font-bold">{user.username}</span> or{' '}
+                    <span className="font-mono text-rose-300 font-bold">DELETE</span> to verify
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={deleteConfirmText}
+                    onChange={(e) => setDeleteConfirmText(e.target.value)}
+                    placeholder={`Type "${user.username}" or "DELETE"`}
+                    className="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-700 focus:border-rose-500 focus:outline-none text-white font-mono"
+                  />
+                </div>
+
+                {!isGoogleOnlyUser ? (
+                  <div>
+                    <label className="block text-slate-300 font-semibold mb-1.5">
+                      Step 2: Enter your current password to verify ownership
+                    </label>
+                    <input
+                      type="password"
+                      required
+                      value={deletePassword}
+                      onChange={(e) => setDeletePassword(e.target.value)}
+                      placeholder={
+                        user.username === 'ArefS'
+                          ? 'Enter password (Demo: Demo@2026)'
+                          : 'Enter your account password'
+                      }
+                      className="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-700 focus:border-rose-500 focus:outline-none text-white"
+                    />
+                  </div>
+                ) : (
+                  <div className="p-2.5 rounded-xl bg-slate-950 border border-slate-800 text-[11px] text-slate-400">
+                    Step 2: Because you signed in with Google, clicking the button below will ask Google to verify your session before deleting your account.
+                  </div>
+                )}
+
+                <div className="flex items-center gap-3 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => setIsDeleteConfirmOpen(false)}
+                    disabled={isDeleting}
+                    className="flex-1 py-2.5 px-4 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={isDeleting || !deleteConfirmText.trim()}
+                    className="flex-1 py-2.5 px-4 rounded-xl bg-rose-600 hover:bg-rose-500 disabled:opacity-50 text-white font-extrabold shadow-lg shadow-rose-600/25 cursor-pointer flex items-center justify-center gap-1.5"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>
+                      {isDeleting ? 'Verifying & Deleting...' : 'Verify & Delete Account'}
+                    </span>
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

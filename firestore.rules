@@ -1,0 +1,238 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 1. Global Safety Net: Default-deny catch-all
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Global Hardened Primitives
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerifiedUser() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isOwner(userId) {
+      return isVerifiedUser() && request.auth.uid == userId;
+    }
+
+    // Validation Blueprint: UserPrivateProfile
+    function isValidUserPrivateProfile(data) {
+      return data.keys().hasAll([
+        'userId',
+        'username',
+        'firstName',
+        'lastName',
+        'email',
+        'phone',
+        'tokenBalance',
+        'streakDay',
+        'streakClaimedToday',
+        'gamingCycleWeek',
+        'kycStatus',
+        'referralCode',
+        'referralCount',
+        'createdAt',
+        'updatedAt'
+      ]) &&
+      data.keys().hasOnly([
+        'userId',
+        'username',
+        'firstName',
+        'lastName',
+        'email',
+        'phone',
+        'tokenBalance',
+        'streakDay',
+        'streakClaimedToday',
+        'lastPredictionDate',
+        'gamingCycleWeek',
+        'kycStatus',
+        'kycDocumentType',
+        'walletAddress',
+        'referralCode',
+        'referredByCode',
+        'referralCount',
+        'createdAt',
+        'updatedAt'
+      ]) &&
+      data.userId == request.auth.uid &&
+      data.userId is string && data.userId.size() >= 1 && data.userId.size() <= 128 && data.userId.matches('^[a-zA-Z0-9_\\-]+$') &&
+      data.username is string && data.username.size() >= 3 && data.username.size() <= 30 && data.username.matches('^[a-zA-Z0-9_\\-]+$') &&
+      data.firstName is string && data.firstName.size() >= 1 && data.firstName.size() <= 80 &&
+      data.lastName is string && data.lastName.size() >= 1 && data.lastName.size() <= 80 &&
+      data.email is string && data.email.size() >= 3 && data.email.size() <= 150 &&
+      data.phone is string && data.phone.size() >= 5 && data.phone.size() <= 30 &&
+      data.tokenBalance is int && data.tokenBalance >= 0 && data.tokenBalance <= 10000 &&
+      data.streakDay is int && data.streakDay >= 1 && data.streakDay <= 7 &&
+      data.streakClaimedToday is bool &&
+      (!('lastPredictionDate' in data) || (data.lastPredictionDate is string && data.lastPredictionDate.size() <= 20)) &&
+      data.gamingCycleWeek is int && data.gamingCycleWeek >= 1 && data.gamingCycleWeek <= 53 &&
+      data.kycStatus is string && data.kycStatus.size() <= 20 && (data.kycStatus in ['UNVERIFIED', 'PENDING', 'VERIFIED']) &&
+      (!('kycDocumentType' in data) || (data.kycDocumentType is string && data.kycDocumentType.size() <= 60)) &&
+      (!('walletAddress' in data) || (data.walletAddress is string && data.walletAddress.size() <= 120)) &&
+      data.referralCode is string && data.referralCode.size() >= 3 && data.referralCode.size() <= 32 && data.referralCode.matches('^[a-zA-Z0-9_\\-]+$') &&
+      (!('referredByCode' in data) || (data.referredByCode is string && data.referredByCode.size() <= 32)) &&
+      data.referralCount is int && data.referralCount >= 0 && data.referralCount <= 10000 &&
+      data.createdAt is timestamp &&
+      data.updatedAt is timestamp;
+    }
+
+    // Validation Blueprint: PublicUserProfile
+    function isValidPublicUserProfile(data) {
+      return data.keys().hasAll(['userId', 'username', 'createdAt']) &&
+      data.keys().hasOnly(['userId', 'username', 'avatarUrl', 'createdAt']) &&
+      data.userId == request.auth.uid &&
+      data.userId is string && data.userId.size() >= 1 && data.userId.size() <= 128 && data.userId.matches('^[a-zA-Z0-9_\\-]+$') &&
+      data.username is string && data.username.size() >= 3 && data.username.size() <= 30 && data.username.matches('^[a-zA-Z0-9_\\-]+$') &&
+      (!('avatarUrl' in data) || (data.avatarUrl is string && data.avatarUrl.size() <= 500)) &&
+      data.createdAt is timestamp;
+    }
+
+    // Validation Blueprint: Prediction
+    function isValidPrediction(data) {
+      return data.keys().hasAll([
+        'id',
+        'userId',
+        'username',
+        'predictedPrice',
+        'submittedAt',
+        'submittedTimestamp',
+        'roundId',
+        'createdAt'
+      ]) &&
+      data.keys().hasOnly([
+        'id',
+        'userId',
+        'username',
+        'avatarUrl',
+        'predictedPrice',
+        'submittedAt',
+        'submittedTimestamp',
+        'roundId',
+        'createdAt'
+      ]) &&
+      data.userId == request.auth.uid &&
+      data.id is string && data.id.size() >= 1 && data.id.size() <= 128 && data.id.matches('^[a-zA-Z0-9_\\-]+$') &&
+      data.userId is string && data.userId.size() >= 1 && data.userId.size() <= 128 && data.userId.matches('^[a-zA-Z0-9_\\-]+$') &&
+      data.username is string && data.username.size() >= 3 && data.username.size() <= 30 &&
+      (!('avatarUrl' in data) || (data.avatarUrl is string && data.avatarUrl.size() <= 500)) &&
+      data.predictedPrice is number && data.predictedPrice >= 10000 && data.predictedPrice <= 500000 &&
+      data.submittedAt is string && data.submittedAt.size() >= 10 && data.submittedAt.size() <= 40 &&
+      data.submittedTimestamp is int && data.submittedTimestamp > 0 &&
+      data.roundId is string && data.roundId.size() >= 1 && data.roundId.size() <= 40 && data.roundId.matches('^[a-zA-Z0-9_\\-]+$') &&
+      data.createdAt is timestamp;
+    }
+
+    // Validation Blueprint: ChatMessage
+    function isValidChatMessage(data) {
+      return data.keys().hasAll([
+        'id',
+        'userId',
+        'username',
+        'message',
+        'timestamp',
+        'roundId',
+        'createdAt'
+      ]) &&
+      data.keys().hasOnly([
+        'id',
+        'userId',
+        'username',
+        'avatarUrl',
+        'message',
+        'timestamp',
+        'roundId',
+        'createdAt'
+      ]) &&
+      data.userId == request.auth.uid &&
+      data.id is string && data.id.size() >= 1 && data.id.size() <= 128 && data.id.matches('^[a-zA-Z0-9_\\-]+$') &&
+      data.userId is string && data.userId.size() >= 1 && data.userId.size() <= 128 && data.userId.matches('^[a-zA-Z0-9_\\-]+$') &&
+      data.username is string && data.username.size() >= 3 && data.username.size() <= 30 &&
+      (!('avatarUrl' in data) || (data.avatarUrl is string && data.avatarUrl.size() <= 500)) &&
+      data.message is string && data.message.size() >= 1 && data.message.size() <= 280 &&
+      data.timestamp is string && data.timestamp.size() >= 1 && data.timestamp.size() <= 16 &&
+      data.roundId is string && data.roundId.size() >= 1 && data.roundId.size() <= 40 && data.roundId.matches('^[a-zA-Z0-9_\\-]+$') &&
+      data.createdAt is timestamp;
+    }
+
+    // Collection 1: Private User Profiles (Strictly isolated PII)
+    match /users/{userId} {
+      allow get: if isOwner(userId) && isValidId(userId);
+      allow list: if false;
+      allow create: if isOwner(userId) && isValidId(userId) && isValidUserPrivateProfile(incoming()) && incoming().createdAt == request.time && incoming().updatedAt == request.time;
+      allow update: if (
+        isOwner(userId) && isValidId(userId) && isValidUserPrivateProfile(incoming()) &&
+        incoming().userId == existing().userId &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time && (
+          // Action 1: Update Profile / KYC Details
+          (incoming().diff(existing()).affectedKeys().hasOnly(['username', 'firstName', 'lastName', 'phone', 'kycStatus', 'kycDocumentType', 'walletAddress', 'updatedAt'])) ||
+          // Action 2: Token & Streak Consumption / Daily Claim
+          (incoming().diff(existing()).affectedKeys().hasOnly(['tokenBalance', 'streakDay', 'streakClaimedToday', 'lastPredictionDate', 'gamingCycleWeek', 'referralCount', 'updatedAt']))
+        )
+      );
+      allow delete: if isOwner(userId) && isValidId(userId);
+    }
+
+    // Collection 2: Public Display Profiles (Non-PII)
+    match /publicProfiles/{userId} {
+      allow get: if isSignedIn() && isValidId(userId);
+      allow list: if false;
+      allow create: if isOwner(userId) && isValidId(userId) && isValidPublicUserProfile(incoming()) && incoming().createdAt == request.time;
+      allow update: if (
+        isOwner(userId) && isValidId(userId) && isValidPublicUserProfile(incoming()) &&
+        incoming().userId == existing().userId &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().diff(existing()).affectedKeys().hasOnly(['username', 'avatarUrl'])
+      );
+      allow delete: if isOwner(userId) && isValidId(userId);
+    }
+
+    // Collection 3: Immutable Predictions (Game Rules v2.2 Section 6)
+    match /predictions/{predictionId} {
+      allow get: if isSignedIn() && isValidId(predictionId);
+      allow list: if isSignedIn() && existing().roundId is string && existing().roundId.size() <= 40;
+      allow create: if (
+        isVerifiedUser() &&
+        isValidId(predictionId) &&
+        isValidPrediction(incoming()) &&
+        incoming().id == predictionId &&
+        incoming().createdAt == request.time &&
+        exists(/databases/$(database)/documents/users/$(request.auth.uid))
+      );
+      allow update, delete: if false;
+    }
+
+    // Collection 4: Global Round Chat Messages
+    match /chatMessages/{messageId} {
+      allow get: if isSignedIn() && isValidId(messageId);
+      allow list: if isSignedIn() && existing().roundId is string && existing().roundId.size() <= 40;
+      allow create: if (
+        isVerifiedUser() &&
+        isValidId(messageId) &&
+        isValidChatMessage(incoming()) &&
+        incoming().id == messageId &&
+        incoming().createdAt == request.time &&
+        exists(/databases/$(database)/documents/users/$(request.auth.uid))
+      );
+      allow update, delete: if false;
+    }
+  }
+}

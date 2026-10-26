@@ -15,7 +15,6 @@ import {
 import {
   AmsterdamClockDetails,
   getAmsterdamClockDetails,
-  formatUSD,
 } from './utils/amsterdamTime';
 import {
   calculateMedianPrice,
@@ -30,6 +29,23 @@ import {
   INITIAL_PREVIOUS_WINNERS,
   INITIAL_USER,
 } from './services/seedData';
+import {
+  auth,
+  db,
+  onAuthStateChanged,
+  fetchFirestoreUserProfile,
+  saveFirestorePrediction,
+  saveFirestoreChatMessage,
+  handleFirestoreError,
+  OperationType,
+} from './services/firebase';
+import {
+  getActiveSessionUser,
+  setActiveSessionUser,
+  syncUserUpdate,
+  logoutCurrentUser,
+} from './services/authService';
+import { collection, query, where, onSnapshot } from 'firebase/firestore';
 import { Header } from './components/Header';
 import { SponsorBanner } from './components/SponsorBanner';
 import { LiveChart } from './components/LiveChart';
@@ -41,18 +57,30 @@ import { LiveStudioModal } from './components/LiveStudioModal';
 import { ResultsModal } from './components/ResultsModal';
 import { UserProfileModal } from './components/UserProfileModal';
 import { RulesTransparencyModal } from './components/RulesTransparencyModal';
-import { ShieldAlert, SlidersHorizontal, Sparkles } from 'lucide-react';
+import { AuthModal, AuthModalMode } from './components/AuthModal';
+import { CheckCircle2, SlidersHorizontal, X } from 'lucide-react';
 
 export default function App() {
   // Amsterdam Clock & Simulated Phase Override (defaults to real-time clock)
   const [clock, setClock] = useState<AmsterdamClockDetails>(() => getAmsterdamClockDetails());
   const [phaseOverride, setPhaseOverride] = useState<RoundPhase | null>(null);
 
-  // User State
-  const [user, setUser] = useState<UserProfile>(() => {
-    const saved = localStorage.getItem('apex_user_profile');
-    return saved ? JSON.parse(saved) : INITIAL_USER;
+  // User Session State (supports logged-in UserProfile or null when logged out)
+  const [user, setUser] = useState<UserProfile | null>(() => {
+    const active = getActiveSessionUser();
+    if (active) return active;
+    // Check if user explicitly logged out previously
+    const explicitlyLoggedOut = localStorage.getItem('apex_explicit_logout') === 'true';
+    if (explicitlyLoggedOut) return null;
+    setActiveSessionUser(INITIAL_USER, 'email');
+    return INITIAL_USER;
   });
+
+  // Track unverified Firebase email address (0 tokens until verified)
+  const [unverifiedEmail, setUnverifiedEmail] = useState<string | null>(null);
+
+  // Auth Banner Notification
+  const [authBanner, setAuthBanner] = useState<string | null>(null);
 
   // Exchange Quotes & Live Price
   const [exchangeQuotes, setExchangeQuotes] = useState<ExchangeQuote[]>([
@@ -63,7 +91,7 @@ export default function App() {
 
   const [currentSpotPrice, setCurrentSpotPrice] = useState<number>(64801.20);
   const [officialSettlementPrice, setOfficialSettlementPrice] = useState<number>(64801.20);
-  const [chartData, setChartData] = useState<ChartPoint[]>(() => generate7DayChartData(64801.20));
+  const [chartData] = useState<ChartPoint[]>(() => generate7DayChartData(64801.20));
 
   // Submissions & Previous Winners
   const [submissions, setSubmissions] = useState<PredictionEntry[]>(() => {
@@ -82,15 +110,116 @@ export default function App() {
   const [isResultsOpen, setIsResultsOpen] = useState(false);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
   const [isRulesOpen, setIsRulesOpen] = useState(false);
+  const [isAuthOpen, setIsAuthOpen] = useState(false);
+  const [authModalMode, setAuthModalMode] = useState<AuthModalMode>('login');
 
   // Cash prize pool ($30,000 baseline)
   const totalCashPool = 30000;
+  const currentRoundId = `round_${clock.dateString.replace(/-/g, '')}`;
 
-  // Persist user & submissions
+  // Listen to Firebase Auth state changes and enforce email verification
   useEffect(() => {
-    localStorage.setItem('apex_user_profile', JSON.stringify(user));
-  }, [user]);
+    const unsubscribe = onAuthStateChanged(auth, async (fbUser) => {
+      if (fbUser) {
+        if (!fbUser.emailVerified) {
+          setUnverifiedEmail(fbUser.email || 'pending@email');
+          setUser(null);
+          return;
+        }
+        setUnverifiedEmail(null);
+        try {
+          const profile = await fetchFirestoreUserProfile(fbUser.uid);
+          if (profile) {
+            localStorage.removeItem('apex_explicit_logout');
+            setActiveSessionUser(profile, 'google');
+            setUser(profile);
+          }
+        } catch {
+          // Profile may still be in onboarding or pending activation
+        }
+      } else {
+        setUnverifiedEmail(null);
+      }
+    });
+    return () => unsubscribe();
+  }, []);
 
+  // Real-time Firestore listener when authenticated & email verified via Firebase Auth
+  useEffect(() => {
+    if (!auth.currentUser || !auth.currentUser.emailVerified) return;
+
+    const predQuery = query(
+      collection(db, 'predictions'),
+      where('roundId', '==', currentRoundId)
+    );
+    const unsubPred = onSnapshot(
+      predQuery,
+      (snapshot) => {
+        if (!snapshot.empty) {
+          const remotePreds: PredictionEntry[] = snapshot.docs.map((d) => {
+            const data = d.data();
+            return {
+              id: data.id,
+              userId: data.userId,
+              username: data.username,
+              avatarUrl: data.avatarUrl || '',
+              predictedPrice: data.predictedPrice,
+              submittedAt: data.submittedAt,
+              submittedTimestamp: data.submittedTimestamp,
+              roundId: data.roundId,
+            };
+          });
+          setSubmissions((prev) => {
+            const existingIds = new Set(remotePreds.map((r) => r.id));
+            const merged = [...remotePreds, ...prev.filter((p) => !existingIds.has(p.id))];
+            merged.sort((a, b) => b.submittedTimestamp - a.submittedTimestamp);
+            return merged;
+          });
+        }
+      },
+      (error) => {
+        handleFirestoreError(error, OperationType.LIST, 'predictions');
+      }
+    );
+
+    const chatQuery = query(
+      collection(db, 'chatMessages'),
+      where('roundId', '==', currentRoundId)
+    );
+    const unsubChat = onSnapshot(
+      chatQuery,
+      (snapshot) => {
+        if (!snapshot.empty) {
+          const remoteMsgs: ChatMessage[] = snapshot.docs.map((d) => {
+            const data = d.data();
+            return {
+              id: data.id,
+              userId: data.userId,
+              username: data.username,
+              avatarUrl: data.avatarUrl || '',
+              message: data.message,
+              timestamp: data.timestamp,
+            };
+          });
+          setChatMessages((prev) => {
+            const existingIds = new Set(prev.map((m) => m.id));
+            const newItems = remoteMsgs.filter((r) => !existingIds.has(r.id));
+            return newItems.length > 0 ? [...prev, ...newItems] : prev;
+          });
+        }
+      },
+      (error) => {
+        handleFirestoreError(error, OperationType.LIST, 'chatMessages');
+      }
+    );
+
+    return () => {
+      unsubPred();
+      unsubChat();
+    };
+  }, [currentRoundId, user?.id]);
+
+  // Persist submissions & chat locally as well
   useEffect(() => {
     localStorage.setItem('apex_submissions', JSON.stringify(submissions));
   }, [submissions]);
@@ -104,7 +233,6 @@ export default function App() {
     const interval = setInterval(() => {
       const details = getAmsterdamClockDetails();
       if (phaseOverride) {
-        // If testing override is selected
         details.phase = phaseOverride;
         if (phaseOverride === 'OPEN') details.phaseLabel = 'Prediction Window Open (12:00–20:00)';
         if (phaseOverride === 'LOCKED_LIVE') details.phaseLabel = 'Locked — Live Studio Active (20:00–22:00)';
@@ -128,7 +256,6 @@ export default function App() {
         setExchangeQuotes(quotes);
         const { median } = calculateMedianPrice(quotes);
         setCurrentSpotPrice(median);
-        // If not yet officially settled, update official settlement baseline candidate
         if (clock.phase === 'OPEN' || clock.phase === 'PRE_OPEN') {
           setOfficialSettlementPrice(median);
         }
@@ -145,9 +272,55 @@ export default function App() {
     };
   }, [clock.phase, currentSpotPrice]);
 
+  const handleOpenAuth = useCallback((mode: AuthModalMode) => {
+    setAuthModalMode(mode);
+    setIsAuthOpen(true);
+  }, []);
+
+  const handleAuthSuccess = useCallback((loggedInUser: UserProfile, isNewRegistration?: boolean) => {
+    localStorage.removeItem('apex_explicit_logout');
+    setUnverifiedEmail(null);
+    setUser(loggedInUser);
+    if (isNewRegistration) {
+      setAuthBanner(
+        `Welcome to ApexPredict, ${loggedInUser.username}! Your email is verified and 5 Free Welcome Tokens have been credited.`
+      );
+    } else {
+      setAuthBanner(`Welcome back, ${loggedInUser.username}! You are now signed in.`);
+    }
+    setTimeout(() => setAuthBanner(null), 6000);
+  }, []);
+
+  const handleLogout = useCallback(async () => {
+    const previousName = user?.username;
+    localStorage.setItem('apex_explicit_logout', 'true');
+    await logoutCurrentUser();
+    setUser(null);
+    setUnverifiedEmail(null);
+    setIsProfileOpen(false);
+    setAuthBanner(previousName ? `Signed out of ${previousName}. See you for the 20:00 price freeze!` : 'You have logged out.');
+    setTimeout(() => setAuthBanner(null), 5000);
+  }, [user]);
+
+  const handleAccountDeleted = useCallback((deletedUsername: string) => {
+    localStorage.setItem('apex_explicit_logout', 'true');
+    setUser(null);
+    setUnverifiedEmail(null);
+    setIsProfileOpen(false);
+    setAuthBanner(
+      `Account "${deletedUsername}" has been verified and permanently deleted.`
+    );
+    setTimeout(() => setAuthBanner(null), 6000);
+  }, []);
+
   // Handle user prediction submission
   const handleSubmitPrediction = useCallback(
     (predictedPrice: number): { success: boolean; error?: string } => {
+      if (!user) {
+        handleOpenAuth('login');
+        return { success: false, error: 'Please log in to submit a prediction.' };
+      }
+
       if (user.tokenBalance < 1) {
         return { success: false, error: 'Insufficient tokens. 1 Token is required per prediction.' };
       }
@@ -165,22 +338,26 @@ export default function App() {
         predictedPrice,
         submittedAt: now.toISOString(),
         submittedTimestamp: Date.now(),
-        roundId: `round_${clock.dateString.replace(/-/g, '')}`,
+        roundId: currentRoundId,
       };
 
       // Consume 1 token and advance daily streak if not yet predicted today (Section 21 & 22)
-      setUser((prev) => {
-        const isFirstToday = prev.lastPredictionDate !== clock.dateString;
-        return {
-          ...prev,
-          tokenBalance: Math.max(0, prev.tokenBalance - 1),
-          lastPredictionDate: clock.dateString,
-          streakDay: isFirstToday ? (prev.streakDay >= 7 ? 1 : prev.streakDay + 1) : prev.streakDay,
-        };
-      });
+      const isFirstToday = user.lastPredictionDate !== clock.dateString;
+      const updatedFields: Partial<UserProfile> = {
+        tokenBalance: Math.max(0, user.tokenBalance - 1),
+        lastPredictionDate: clock.dateString,
+        streakDay: isFirstToday ? (user.streakDay >= 7 ? 1 : user.streakDay + 1) : user.streakDay,
+      };
+
+      syncUserUpdate(user, updatedFields).then((synced) => setUser(synced));
 
       // Add to immutable submissions
       setSubmissions((prev) => [newEntry, ...prev]);
+
+      // Persist to Firestore if authenticated via Firebase
+      if (auth.currentUser && auth.currentUser.uid === user.id) {
+        saveFirestorePrediction(newEntry).catch(() => {});
+      }
 
       // Add a chat announcement
       const systemAnnouncement: ChatMessage = {
@@ -196,12 +373,17 @@ export default function App() {
 
       return { success: true };
     },
-    [user, clock]
+    [user, clock, currentRoundId, handleOpenAuth]
   );
 
   // Handle user chat message
   const handleSendMessage = useCallback(
     (text: string): { success: boolean; error?: string } => {
+      if (!user) {
+        handleOpenAuth('login');
+        return { success: false, error: 'Please log in to chat.' };
+      }
+
       const newMsg: ChatMessage = {
         id: `msg_${Date.now()}`,
         userId: user.id,
@@ -211,24 +393,33 @@ export default function App() {
         timestamp: clock.timeString.slice(0, 5),
       };
       setChatMessages((prev) => [...prev, newMsg]);
+
+      if (auth.currentUser && auth.currentUser.uid === user.id) {
+        saveFirestoreChatMessage(newMsg, currentRoundId).catch(() => {});
+      }
+
       return { success: true };
     },
-    [user, clock]
+    [user, clock, currentRoundId, handleOpenAuth]
   );
 
   // Daily tokens claim (Section 4)
   const handleClaimDailyTokens = useCallback(() => {
-    setUser((prev) => ({
-      ...prev,
-      tokenBalance: prev.tokenBalance + 2,
+    if (!user) return;
+    syncUserUpdate(user, {
+      tokenBalance: user.tokenBalance + 2,
       streakClaimedToday: true,
-    }));
-  }, []);
+    }).then((synced) => setUser(synced));
+  }, [user]);
 
   // Update profile
-  const handleUpdateUser = useCallback((updated: Partial<UserProfile>) => {
-    setUser((prev) => ({ ...prev, ...updated }));
-  }, []);
+  const handleUpdateUser = useCallback(
+    (updated: Partial<UserProfile>) => {
+      if (!user) return;
+      syncUserUpdate(user, updated).then((synced) => setUser(synced));
+    },
+    [user]
+  );
 
   // Compute live rankings
   const rankedPredictions = calculateRankingsAndPrizes(
@@ -243,11 +434,32 @@ export default function App() {
       <Header
         clock={clock}
         user={user}
+        unverifiedEmail={unverifiedEmail}
         onOpenProfile={() => setIsProfileOpen(true)}
         onOpenRules={() => setIsRulesOpen(true)}
         onOpenStudio={() => setIsStudioOpen(true)}
         onOpenResults={() => setIsResultsOpen(true)}
+        onOpenAuth={handleOpenAuth}
+        onLogout={handleLogout}
       />
+
+      {/* Authentication Status Toast Banner */}
+      {authBanner && (
+        <div className="max-w-7xl mx-auto w-full px-4 sm:px-6 pt-4">
+          <div className="p-3 rounded-xl bg-emerald-950/70 border border-emerald-500/40 text-emerald-200 text-xs flex items-center justify-between gap-3 shadow-lg">
+            <div className="flex items-center gap-2">
+              <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+              <span className="font-medium">{authBanner}</span>
+            </div>
+            <button
+              onClick={() => setAuthBanner(null)}
+              className="text-emerald-400 hover:text-white cursor-pointer"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Main Content Viewport: Full 1440px desktop presence */}
       <main className="flex-1 max-w-7xl mx-auto w-full px-4 sm:px-6 py-6 space-y-6">
@@ -277,14 +489,16 @@ export default function App() {
               currentSpotPrice={currentSpotPrice}
               clock={clock}
               user={user}
+              unverifiedEmail={unverifiedEmail}
               onSubmitPrediction={handleSubmitPrediction}
+              onOpenAuth={handleOpenAuth}
             />
 
             {/* Submissions List matching image.png */}
             <SubmissionsList
               submissions={submissions}
               clock={clock}
-              currentUserId={user.id}
+              currentUserId={user?.id || ''}
             />
           </div>
 
@@ -294,6 +508,7 @@ export default function App() {
               messages={chatMessages}
               currentUser={user}
               onSendMessage={handleSendMessage}
+              onOpenAuth={handleOpenAuth}
             />
           </div>
         </div>
@@ -384,6 +599,14 @@ export default function App() {
       </footer>
 
       {/* Modals */}
+      <AuthModal
+        isOpen={isAuthOpen}
+        initialMode={authModalMode}
+        initialPendingEmail={unverifiedEmail}
+        onClose={() => setIsAuthOpen(false)}
+        onAuthSuccess={handleAuthSuccess}
+      />
+
       <LiveStudioModal
         isOpen={isStudioOpen}
         onClose={() => setIsStudioOpen(false)}
@@ -403,17 +626,25 @@ export default function App() {
         totalCashPool={totalCashPool}
         onStartKycClaim={() => {
           setIsResultsOpen(false);
-          setIsProfileOpen(true);
+          if (user) {
+            setIsProfileOpen(true);
+          } else {
+            handleOpenAuth('login');
+          }
         }}
       />
 
-      <UserProfileModal
-        isOpen={isProfileOpen}
-        onClose={() => setIsProfileOpen(false)}
-        user={user}
-        onUpdateUser={handleUpdateUser}
-        onClaimDailyTokens={handleClaimDailyTokens}
-      />
+      {user && (
+        <UserProfileModal
+          isOpen={isProfileOpen}
+          onClose={() => setIsProfileOpen(false)}
+          user={user}
+          onUpdateUser={handleUpdateUser}
+          onClaimDailyTokens={handleClaimDailyTokens}
+          onLogout={handleLogout}
+          onAccountDeleted={handleAccountDeleted}
+        />
+      )}
 
       <RulesTransparencyModal
         isOpen={isRulesOpen}

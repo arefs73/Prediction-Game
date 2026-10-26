@@ -1,17 +1,20 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { ChatMessage, UserProfile } from '../types/game';
-import { AlertCircle, Flag, MessageSquare, Send, ShieldAlert, UserX } from 'lucide-react';
+import { AlertCircle, Flag, LogIn, MessageSquare, Send, UserX } from 'lucide-react';
+import { AuthModalMode } from './AuthModal';
 
 interface GlobalChatProps {
   messages: ChatMessage[];
-  currentUser: UserProfile;
+  currentUser: UserProfile | null;
   onSendMessage: (text: string) => { success: boolean; error?: string };
+  onOpenAuth: (mode: AuthModalMode) => void;
 }
 
 export const GlobalChat: React.FC<GlobalChatProps> = ({
   messages,
   currentUser,
   onSendMessage,
+  onOpenAuth,
 }) => {
   const [inputText, setInputText] = useState('');
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -19,7 +22,6 @@ export const GlobalChat: React.FC<GlobalChatProps> = ({
   const [reportedMsgIds, setReportedMsgIds] = useState<string[]>([]);
   const chatScrollRef = useRef<HTMLDivElement>(null);
 
-  // Auto scroll to bottom on new message
   useEffect(() => {
     if (chatScrollRef.current) {
       chatScrollRef.current.scrollTop = chatScrollRef.current.scrollHeight;
@@ -30,16 +32,19 @@ export const GlobalChat: React.FC<GlobalChatProps> = ({
     e.preventDefault();
     setErrorMsg(null);
 
+    if (!currentUser) {
+      onOpenAuth('login');
+      return;
+    }
+
     const trimmed = inputText.trim();
     if (!trimmed) return;
 
-    // Rate limit / link control check per Section 25
     if (trimmed.length > 280) {
       setErrorMsg('Message exceeds 280 character limit.');
       return;
     }
 
-    // Link controls: prohibit external link spam
     const urlPattern = /(https?:\/\/|www\.)[^\s]+/gi;
     if (urlPattern.test(trimmed)) {
       setErrorMsg('Links are disabled in Round Chat per anti-spam moderation policy.');
@@ -86,7 +91,7 @@ export const GlobalChat: React.FC<GlobalChatProps> = ({
         className="flex-1 overflow-y-auto py-3 space-y-3 pr-1 text-xs"
       >
         {visibleMessages.map((msg) => {
-          const isMe = msg.userId === currentUser.id;
+          const isMe = currentUser ? msg.userId === currentUser.id : false;
           const isReported = reportedMsgIds.includes(msg.id);
 
           if (msg.isSystem) {
@@ -173,31 +178,44 @@ export const GlobalChat: React.FC<GlobalChatProps> = ({
           </div>
         )}
 
-        <form onSubmit={handleSubmit} className="flex gap-2">
-          <input
-            type="text"
-            value={inputText}
-            onChange={(e) => {
-              setInputText(e.target.value);
-              setErrorMsg(null);
-            }}
-            maxLength={280}
-            placeholder="Share insights or discuss..."
-            className="flex-1 bg-slate-950 border border-slate-700/80 rounded-xl px-3 py-2 text-xs text-white placeholder:text-slate-500 focus:outline-none focus:border-cyan-400"
-          />
-          <button
-            type="submit"
-            disabled={!inputText.trim()}
-            className="px-3.5 py-2 rounded-xl bg-cyan-500 hover:bg-cyan-400 disabled:bg-slate-800 disabled:text-slate-600 text-slate-950 font-bold transition-all cursor-pointer disabled:cursor-not-allowed flex items-center justify-center shrink-0"
-          >
-            <Send className="w-3.5 h-3.5" />
-          </button>
-        </form>
+        {currentUser ? (
+          <>
+            <form onSubmit={handleSubmit} className="flex gap-2">
+              <input
+                type="text"
+                value={inputText}
+                onChange={(e) => {
+                  setInputText(e.target.value);
+                  setErrorMsg(null);
+                }}
+                maxLength={280}
+                placeholder="Share insights or discuss..."
+                className="flex-1 bg-slate-950 border border-slate-700/80 rounded-xl px-3 py-2 text-xs text-white placeholder:text-slate-500 focus:outline-none focus:border-cyan-400"
+              />
+              <button
+                type="submit"
+                disabled={!inputText.trim()}
+                className="px-3.5 py-2 rounded-xl bg-cyan-500 hover:bg-cyan-400 disabled:bg-slate-800 disabled:text-slate-600 text-slate-950 font-bold transition-all cursor-pointer disabled:cursor-not-allowed flex items-center justify-center shrink-0"
+              >
+                <Send className="w-3.5 h-3.5" />
+              </button>
+            </form>
 
-        <div className="mt-1.5 flex items-center justify-between text-[10px] text-slate-500">
-          <span>Rate limited & moderated (Section 25)</span>
-          <span className="font-mono">{inputText.length}/280</span>
-        </div>
+            <div className="mt-1.5 flex items-center justify-between text-[10px] text-slate-500">
+              <span>Rate limited & moderated (Section 25)</span>
+              <span className="font-mono">{inputText.length}/280</span>
+            </div>
+          </>
+        ) : (
+          <button
+            type="button"
+            onClick={() => onOpenAuth('login')}
+            className="w-full py-2.5 px-3 rounded-xl bg-slate-950 hover:bg-slate-800 border border-slate-700/80 text-xs font-semibold text-cyan-400 flex items-center justify-center gap-1.5 cursor-pointer transition-colors"
+          >
+            <LogIn className="w-3.5 h-3.5" />
+            <span>Log In to Join Round Chat</span>
+          </button>
+        )}
       </div>
     </div>
   );
