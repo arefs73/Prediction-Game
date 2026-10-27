@@ -8,7 +8,10 @@ interface ResultsModalProps {
   isOpen: boolean;
   onClose: () => void;
   clock: AmsterdamClockDetails;
-  officialSettlementPrice: number;
+  officialSettlementPrice: number | null;
+  published?: boolean;
+  auditHash?: string;
+  roundId?: string;
   rankedPredictions: RankedPrediction[];
   currentUser: UserProfile | null;
   totalCashPool: number;
@@ -24,11 +27,13 @@ export const ResultsModal: React.FC<ResultsModalProps> = ({
   currentUser,
   totalCashPool,
   onStartKycClaim,
+  published = false, auditHash, roundId,
 }) => {
   const [activeTab, setActiveTab] = useState<'myResult' | 'leaderboard' | 'audit'>('myResult');
   const [copiedHash, setCopiedHash] = useState(false);
 
   if (!isOpen) return null;
+  if (!published) return <div className="fixed inset-0 z-50 bg-slate-950 p-8 text-white"><p>Official results are published by the server at or after 22:00 Amsterdam. A suspended round requires review.</p><button onClick={onClose}>Close</button></div>;
 
   // Find current user's prediction result
   const myResult = currentUser
@@ -38,10 +43,10 @@ export const ResultsModal: React.FC<ResultsModalProps> = ({
   // Top 100 leaderboard
   const top100 = rankedPredictions.slice(0, 100);
 
-  const mockAuditHash = '0x9a8f273d40e981bc883491fec0b982143ea920b72189ac354bf52199fba200e1';
+  const recordedAuditHash = auditHash || 'Not available';
 
   const copyAuditTrail = () => {
-    navigator.clipboard.writeText(mockAuditHash);
+    navigator.clipboard.writeText(recordedAuditHash);
     setCopiedHash(true);
     setTimeout(() => setCopiedHash(false), 3000);
   };
@@ -66,7 +71,7 @@ export const ResultsModal: React.FC<ResultsModalProps> = ({
               <div className="flex items-center gap-2">
                 <span className="font-bold text-white text-lg">Official Tournament Results</span>
                 <span className="text-[10px] font-mono font-bold text-emerald-400 bg-emerald-950/70 border border-emerald-800/60 px-2 py-0.5 rounded uppercase">
-                  Published 22:00:00 CEST
+                  Published after 22:00 Amsterdam
                 </span>
               </div>
               <p className="text-xs text-slate-400">
@@ -113,7 +118,7 @@ export const ResultsModal: React.FC<ResultsModalProps> = ({
                 : 'text-slate-400 hover:text-slate-200'
             }`}
           >
-            Provable Audit Ledger (Section 28)
+            Settlement Audit (Section 28)
           </button>
         </div>
 
@@ -277,29 +282,30 @@ export const ResultsModal: React.FC<ResultsModalProps> = ({
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2 text-cyan-400 font-bold">
                   <Hash className="w-4 h-4" />
-                  <span>Provable Settlement Audit Ledger (Section 28)</span>
+                  <span>Settlement Audit (Section 28)</span>
                 </div>
                 <button
                   onClick={copyAuditTrail}
                   className="px-2.5 py-1 rounded bg-slate-900 border border-slate-800 hover:text-white text-slate-400 font-mono text-[11px] flex items-center gap-1 cursor-pointer"
                 >
                   <Copy className="w-3 h-3" />
-                  <span>{copiedHash ? 'Copied Hash!' : 'Copy Hash'}</span>
+                  <span>{copiedHash ? 'Copied Hash!' : 'Copy SHA-256'}</span>
                 </button>
               </div>
 
               <div className="p-3 rounded-lg bg-slate-900/90 font-mono text-[11px] text-slate-300 space-y-1.5 border border-slate-800">
-                <div><span className="text-slate-500">Round ID:</span> round_{clock.dateString.replace(/-/g, '')}</div>
+                <div><span className="text-slate-500">Round ID:</span> {roundId}</div>
                 <div><span className="text-slate-500">Timezone Authority:</span> Europe/Amsterdam (IANA)</div>
-                <div><span className="text-slate-500">Price Collection Freeze:</span> 20:00:00.000 CEST</div>
-                <div><span className="text-slate-500">Winner Publication:</span> 22:00:00.000 CEST</div>
-                <div><span className="text-slate-500">Settlement Formula:</span> Median(Coinbase, Binance, Kraken)</div>
+                <div><span className="text-slate-500">Price Collection Freeze:</span> 20:00 Amsterdam; collection window up to 3 seconds</div>
+                <div><span className="text-slate-500">Winner Publication:</span> 22:00 Amsterdam</div>
+                <div><span className="text-slate-500">Settlement Formula:</span> Median(Coinbase, Bitstamp, Kraken)</div>
                 <div><span className="text-slate-500">Deterministic Price:</span> {formatUSD(officialSettlementPrice)}</div>
-                <div><span className="text-slate-500">Audit Merkle Root:</span> <span className="text-cyan-400 break-all">{mockAuditHash}</span></div>
+                <div><a href={'/api/rounds/' + roundId + '/audit'} target="_blank" rel="noreferrer">Download audit JSON</a></div>
+                <div><span className="text-slate-500">Audit SHA-256:</span> <span className="text-cyan-400 break-all">{recordedAuditHash}</span></div>
               </div>
 
               <p className="text-[11px] text-slate-400 leading-relaxed">
-                All participant predictions, precision timestamps, and multi-source API responses are cryptographically committed to ensure absolute mathematical reproducibility and prevent retroactive alterations.
+                The SHA-256 digest identifies the published audit JSON. It is a consistency check, not proof that a database administrator cannot change records.
               </p>
             </div>
           )}

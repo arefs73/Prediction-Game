@@ -202,24 +202,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     }
   };
 
-  const handleDemoQuickLogin = async () => {
-    setError(null);
-    setProviderConsoleUrl(null);
-    setIsLoading(true);
-    try {
-      const res = await loginWithFirebaseEmail('ArefS', 'Demo@2026');
-      if (res.status === 'SUCCESS' && res.user) {
-        onAuthSuccess(res.user, false);
-        onClose();
-      } else {
-        setLoginIdentifier('ArefS');
-        setLoginPassword('Demo@2026');
-      }
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
   const handleSignUpSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
@@ -621,18 +603,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 {isLoading ? 'Verifying Credentials...' : 'Sign In to Account'}
               </button>
             </form>
-
-            {/* Quick Demo Login Helper */}
-            <div className="pt-3 border-t border-slate-800/80 flex items-center justify-between text-[11px] text-slate-400">
-              <span>Testing the platform?</span>
-              <button
-                type="button"
-                onClick={handleDemoQuickLogin}
-                className="px-3 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-700 text-cyan-300 font-mono font-semibold cursor-pointer transition-colors"
-              >
-                Quick Fill Demo Account (ArefS)
-              </button>
-            </div>
           </div>
         )}
 
@@ -836,19 +806,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 </div>
               )}
 
-              {/* Optional Referral Code */}
-              <div>
-                <label className="block text-slate-400 font-medium mb-1">
-                  Referral Code <span className="text-[10px] text-slate-500">(Optional · Section 23)</span>
-                </label>
-                <input
-                  type="text"
-                  value={referralCodeUsed}
-                  onChange={(e) => setReferralCodeUsed(e.target.value)}
-                  placeholder="e.g. AREF-BTC-WIN"
-                  className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 focus:border-cyan-400 focus:outline-none text-white font-mono uppercase"
-                />
-              </div>
+              <p className="text-xs text-slate-400">Referral rewards are not active yet.</p>
 
               {/* Privacy & Terms Checkbox */}
               <div className="p-2.5 rounded-xl bg-slate-950/90 border border-slate-800/80 space-y-1.5">

@@ -18,7 +18,7 @@ export interface UserProfile {
 }
 
 export interface ExchangeQuote {
-  exchange: 'Coinbase' | 'Binance' | 'Kraken';
+  exchange: 'Coinbase' | 'Bitstamp' | 'Kraken';
   price: number;
   timestamp: number;
   latencyMs: number;
@@ -32,7 +32,7 @@ export interface PredictionEntry {
   userId: string;
   username: string;
   avatarUrl: string;
-  predictedPrice: number;
+  predictedPrice: number | null;
   submittedAt: string; // ISO string
   submittedTimestamp: number;
   roundId: string;

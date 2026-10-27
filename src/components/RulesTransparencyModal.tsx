@@ -28,9 +28,9 @@ export const RulesTransparencyModal: React.FC<RulesTransparencyModalProps> = ({
           </div>
           <div>
             <div className="flex items-center gap-2">
-              <h2 className="text-lg font-bold text-white">Game Rules v2.2 - Product Baseline</h2>
+              <h2 className="text-lg font-bold text-white">Game Rules v3.0 draft - Product Baseline</h2>
               <span className="text-[10px] font-mono text-cyan-400 bg-cyan-950 border border-cyan-800 px-2 py-0.5 rounded font-bold">
-                September 2026 Baseline
+                Security implementation draft
               </span>
             </div>
             <p className="text-xs text-slate-400">
@@ -52,11 +52,11 @@ export const RulesTransparencyModal: React.FC<RulesTransparencyModalProps> = ({
               <li><strong className="text-white">Immutability:</strong> Predictions are permanently irreversible once confirmed.</li>
               <li><strong className="text-white">Prediction Window:</strong> Open daily from 12:00 to 20:00 Europe/Amsterdam.</li>
               <li><strong className="text-white">Anti-Herding Rule:</strong> Values remain hidden ($•••••.••) until 20:00:00 and unmask when the round locks.</li>
-              <li><strong className="text-white">Settlement Model:</strong> 3-provider Median Price Model (Coinbase, Binance, Kraken) calculated and frozen at 20:00:00.</li>
-              <li><strong className="text-white">Tie-Breaker:</strong> Submission Timestamp is the tie-breaker for equal prediction error. Earlier submission wins.</li>
-              <li><strong className="text-white">Prize Tiers:</strong> Ranks #1–#30 receive cash prizes (100% of cash pool allocated); Ranks #31–#100 receive non-cash rewards.</li>
-              <li><strong className="text-white">Streak System:</strong> Days 1–7 grant 1 to 7 bonus tokens; requires at least 1 valid prediction per day to maintain.</li>
-              <li><strong className="text-white">Weekly Reset:</strong> Unused tokens expire at the end of each 7-day cycle.</li>
+              <li><strong className="text-white">Settlement Model:</strong> 3-provider Median Price Model (Coinbase, Bitstamp, Kraken) collected at 20:00 within a maximum 3-second window. All three USD sources must be available and agree within 1%; otherwise the round is suspended.</li>
+              <li><strong className="text-white">Tie-Breaker:</strong> Submission Timestamp is the tie-breaker for equal prediction error. Earlier server submission wins; exact ties use the prediction ID. Each user wins at most once, using their best prediction.</li>
+              <li><strong className="text-white">Prize Tiers:</strong> Ranks #1–#30 share the cash pool. With fewer than 30 winners, available weights are normalized proportionally. Ranks #31–#100 receive non-cash rewards pending fulfillment. With no entries the pool remains unallocated for operator resolution.</li>
+              <li><strong className="text-white">Streak System:</strong> The first accepted prediction each day grants the day 1–7 bonus. Missed participation days and Monday reset the streak. Two base tokens may be claimed once daily after registration day.</li>
+              <li><strong className="text-white">Weekly Reset:</strong> Unused tokens expire every Monday at 00:00 Amsterdam.</li>
             </ul>
           </div>
 
@@ -67,19 +67,19 @@ export const RulesTransparencyModal: React.FC<RulesTransparencyModalProps> = ({
               Operational Timezone & Daily Milestones (Section 15)
             </div>
             <p className="text-slate-400">
-              All times use the IANA timezone <code>Europe/Amsterdam</code> rather than hard-coded CET/CEST to handle daylight-saving changes automatically.
+              All times use the IANA timezone <code>Europe/Amsterdam</code> rather than hard-coded CET/Amsterdam to handle daylight-saving changes automatically.
             </p>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 font-mono text-[11px] pt-1">
               <div className="p-2.5 bg-slate-900 rounded-lg border border-slate-800">
-                <span className="text-cyan-400 font-bold block">12:00:00 CEST</span>
+                <span className="text-cyan-400 font-bold block">12:00:00 Amsterdam</span>
                 <span className="text-slate-400">Prediction Window Opens</span>
               </div>
               <div className="p-2.5 bg-slate-900 rounded-lg border border-slate-800">
-                <span className="text-amber-400 font-bold block">20:00:00 CEST</span>
+                <span className="text-amber-400 font-bold block">20:00:00 Amsterdam</span>
                 <span className="text-slate-400">Price Freeze & Unmask</span>
               </div>
               <div className="p-2.5 bg-slate-900 rounded-lg border border-slate-800">
-                <span className="text-emerald-400 font-bold block">22:00:00 CEST</span>
+                <span className="text-emerald-400 font-bold block">22:00:00 Amsterdam</span>
                 <span className="text-slate-400">Official Announcement</span>
               </div>
             </div>

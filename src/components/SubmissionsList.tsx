@@ -27,7 +27,7 @@ export const SubmissionsList: React.FC<SubmissionsListProps> = ({
         hour: '2-digit',
         minute: '2-digit',
         hour12: false,
-      }) + ' CEST';
+      }) + ' Amsterdam';
     } catch {
       return 'Today';
     }
@@ -73,7 +73,7 @@ export const SubmissionsList: React.FC<SubmissionsListProps> = ({
           {submissions.map((sub) => {
             const isMe = sub.userId === currentUserId;
             // The user always can see their own prediction, or everyone after 20:00
-            const canSeeExactValue = isMe || isPost2000;
+            const canSeeExactValue = sub.predictedPrice !== null && (isMe || isPost2000);
 
             return (
               <div

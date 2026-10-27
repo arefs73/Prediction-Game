@@ -1,0 +1,1 @@
+{"indexes":[{"collectionGroup":"chatMessages","queryScope":"COLLECTION","fields":[{"fieldPath":"roundId","order":"ASCENDING"},{"fieldPath":"createdAt","order":"DESCENDING"}]}],"fieldOverrides":[]}

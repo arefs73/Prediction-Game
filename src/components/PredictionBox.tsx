@@ -1,3 +1,4 @@
+import { createPortal } from 'react-dom';
 import React, { useState } from 'react';
 import { UserProfile } from '../types/game';
 import { AmsterdamClockDetails, formatUSD } from '../utils/amsterdamTime';
@@ -9,7 +10,7 @@ interface PredictionBoxProps {
   clock: AmsterdamClockDetails;
   user: UserProfile | null;
   unverifiedEmail?: string | null;
-  onSubmitPrediction: (price: number) => { success: boolean; error?: string };
+  onSubmitPrediction: (price: number, requestId: string) => Promise<{ success: boolean; error?: string }>;
   onOpenAuth: (mode: AuthModalMode) => void;
 }
 
@@ -25,6 +26,9 @@ export const PredictionBox: React.FC<PredictionBoxProps> = ({
   const [showConfirmModal, setShowConfirmModal] = useState<boolean>(false);
   const [inputError, setInputError] = useState<string | null>(null);
   const [successToast, setSuccessToast] = useState<string | null>(null);
+
+  const [submitting, setSubmitting] = useState(false);
+  const requestRef = React.useRef<{ price: number; id: string } | null>(null);
 
   // Validate number format (max 2 decimals, positive)
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -76,12 +80,19 @@ export const PredictionBox: React.FC<PredictionBoxProps> = ({
     setShowConfirmModal(true);
   };
 
-  const handleFinalConfirm = () => {
+  const handleFinalConfirm = async () => {
+    if (submitting) return;
+    setSubmitting(true);
     const parsed = Math.round(parseFloat(inputValue) * 100) / 100;
-    const res = onSubmitPrediction(parsed);
+    if (!requestRef.current || requestRef.current.price !== parsed) requestRef.current = { price: parsed, id: crypto.randomUUID() };
+    let res: { success: boolean; error?: string };
+    try { res = await onSubmitPrediction(parsed, requestRef.current.id); }
+    catch (e) { res = { success: false, error: (e as Error).message }; }
+    finally { setSubmitting(false); }
     setShowConfirmModal(false);
 
     if (res.success) {
+      requestRef.current = null;
       setSuccessToast(`Prediction of ${formatUSD(parsed)} permanently locked! 1 Token consumed.`);
       setInputValue('');
       setTimeout(() => setSuccessToast(null), 5000);
@@ -114,7 +125,7 @@ export const PredictionBox: React.FC<PredictionBoxProps> = ({
               Your 20:00:00 Price Prediction (USD)
             </label>
             <div className="text-xs text-slate-400 font-mono">
-              Current Spot: <span className="text-cyan-400 font-semibold">{formatUSD(currentSpotPrice)}</span>
+              Current Spot: <span className="text-cyan-400 font-semibold">{(currentSpotPrice > 0 ? formatUSD(currentSpotPrice) : 'Unavailable')}</span>
             </div>
           </div>
 
@@ -224,7 +235,7 @@ export const PredictionBox: React.FC<PredictionBoxProps> = ({
       </form>
 
       {/* Confirmation Screen per Game Rules Section 5 & 6 */}
-      {showConfirmModal && user && (
+      {showConfirmModal && user && createPortal(
         <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-slate-900 border border-slate-700 rounded-2xl max-w-md w-full p-6 shadow-2xl relative animate-in fade-in zoom-in-95 duration-150">
             <button
@@ -293,13 +304,14 @@ export const PredictionBox: React.FC<PredictionBoxProps> = ({
               <button
                 type="button"
                 onClick={handleFinalConfirm}
+                  disabled={submitting}
                 className="flex-1 py-2.5 px-4 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-slate-950 font-bold text-xs shadow-lg shadow-emerald-500/25 cursor-pointer"
               >
                 Confirm & Lock In
               </button>
             </div>
           </div>
-        </div>
+        </div>, document.body
       )}
     </div>
   );

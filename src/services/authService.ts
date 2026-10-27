@@ -1,5 +1,5 @@
 import { UserProfile } from '../types/game';
-import { INITIAL_USER } from './seedData';
+
 import {
   auth,
   googleProvider,
@@ -19,14 +19,12 @@ import {
   fetchFirestoreUserProfile,
   createFirestoreUserProfile,
   updateFirestoreProfileDetails,
-  updateFirestoreTokenState,
   deleteFirestoreUserProfile,
   sanitizeUsername,
 } from './firebase';
 
 export interface StoredAccount {
   user: UserProfile;
-  passwordHash: string;
   authProvider: 'email' | 'google';
   createdAt: string;
 }
@@ -48,47 +46,9 @@ const PENDING_PROFILES_KEY = 'apex_pending_email_profiles_v2';
 
 export const FIREBASE_AUTH_PROVIDERS_CONSOLE_URL = `https://console.firebase.google.com/project/${FIREBASE_PROJECT_ID}/authentication/providers`;
 
-function hashPassword(password: string): string {
-  let h1 = 0xdeadbeef ^ password.length;
-  let h2 = 0x41c6ce57 ^ password.length;
-  for (let i = 0, ch; i < password.length; i++) {
-    ch = password.charCodeAt(i);
-    h1 = Math.imul(h1 ^ ch, 2654435761);
-    h2 = Math.imul(h2 ^ ch, 1597334677);
-  }
-  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
-  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
-  return `h_${(h2 >>> 0).toString(16).padStart(8, '0')}${(h1 >>> 0).toString(16).padStart(8, '0')}`;
-}
-
-export function getRegisteredAccounts(): Record<string, StoredAccount> {
-  try {
-    const raw = localStorage.getItem(ACCOUNTS_STORAGE_KEY);
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      if (parsed && typeof parsed === 'object') {
-        return parsed;
-      }
-    }
-  } catch {
-    // ignore storage errors
-  }
-
-  const seedAccounts: Record<string, StoredAccount> = {
-    [INITIAL_USER.id]: {
-      user: INITIAL_USER,
-      passwordHash: hashPassword('Demo@2026'),
-      authProvider: 'email',
-      createdAt: '2026-10-01T12:00:00.000Z',
-    },
-  };
-  localStorage.setItem(ACCOUNTS_STORAGE_KEY, JSON.stringify(seedAccounts));
-  return seedAccounts;
-}
-
-function saveRegisteredAccounts(accounts: Record<string, StoredAccount>): void {
-  localStorage.setItem(ACCOUNTS_STORAGE_KEY, JSON.stringify(accounts));
-}
+const accountCache: Record<string, StoredAccount> = {};
+export function getRegisteredAccounts() { return accountCache; }
+function saveRegisteredAccounts(accounts: Record<string, StoredAccount>) { Object.assign(accountCache, accounts); }
 
 function getPendingProfiles(): Record<string, PendingRegistrationMetadata> {
   try {
@@ -141,7 +101,6 @@ export function setActiveSessionUser(
   const existing = accounts[user.id];
   accounts[user.id] = {
     user,
-    passwordHash: existing?.passwordHash || hashPassword('firebase_auth'),
     authProvider: existing?.authProvider || authProvider,
     createdAt: existing?.createdAt || new Date().toISOString(),
   };
@@ -401,7 +360,6 @@ export interface LoginResult {
 
 /**
  * Signs in a participant.
- * - Supports the built-in Demo account (`ArefS` / `Demo@2026`)
  * - Uses Firebase `signInWithEmailAndPassword` for email accounts and strictly enforces `emailVerified === true`
  */
 export async function loginWithFirebaseEmail(
@@ -411,17 +369,6 @@ export async function loginWithFirebaseEmail(
   const cleanId = identifier.trim();
   if (!cleanId || !password) {
     return { status: 'ERROR', error: 'Please enter both your email/username and password.' };
-  }
-
-  // Allow instant login for the built-in Demo account ('ArefS' or 'aref.s.1373@gmail.com' with 'Demo@2026')
-  if (
-    (cleanId.toLowerCase() === 'arefs' || cleanId.toLowerCase() === INITIAL_USER.email.toLowerCase()) &&
-    password === 'Demo@2026'
-  ) {
-    const accounts = getRegisteredAccounts();
-    const demoUser = accounts[INITIAL_USER.id]?.user || INITIAL_USER;
-    setActiveSessionUser(demoUser, 'email');
-    return { status: 'SUCCESS', user: demoUser, isNewActivation: false };
   }
 
   // Resolve username to email if user typed their username and it's in pending/local records
@@ -540,17 +487,7 @@ export async function changeAccountPassword(
     }
   }
 
-  const accounts = getRegisteredAccounts();
-  const acc = accounts[userId];
-  if (!acc) {
-    return { success: false, error: 'Account record not found.' };
-  }
-  if (acc.passwordHash !== hashPassword(currentPassword)) {
-    return { success: false, error: 'Your current password is incorrect.' };
-  }
-  acc.passwordHash = hashPassword(newPassword);
-  saveRegisteredAccounts(accounts);
-  return { success: true };
+  return { success: false, error: 'Sign in again to change your password.' };
 }
 
 export interface GoogleSignInResult {
@@ -664,64 +601,12 @@ export async function completeGoogleOnboarding(params: {
   }
 }
 
-export async function syncUserUpdate(
-  currentUser: UserProfile,
-  updates: Partial<UserProfile>
-): Promise<UserProfile> {
-  const updatedUser: UserProfile = {
-    ...currentUser,
-    ...updates,
-  };
-
-  setActiveSessionUser(updatedUser);
-
-  if (auth.currentUser && auth.currentUser.uid === currentUser.id && auth.currentUser.emailVerified) {
-    const profileFieldKeys = [
-      'username',
-      'firstName',
-      'lastName',
-      'phone',
-      'kycStatus',
-      'kycDocumentType',
-      'walletAddress',
-    ] as const;
-    const tokenFieldKeys = [
-      'tokenBalance',
-      'streakDay',
-      'streakClaimedToday',
-      'lastPredictionDate',
-      'gamingCycleWeek',
-      'referralCount',
-    ] as const;
-
-    const hasProfileUpdates = profileFieldKeys.some((k) => k in updates);
-    const hasTokenUpdates = tokenFieldKeys.some((k) => k in updates);
-
-    if (hasProfileUpdates) {
-      await updateFirestoreProfileDetails(currentUser.id, {
-        username: updatedUser.username,
-        firstName: updatedUser.firstName,
-        lastName: updatedUser.lastName,
-        phone: updatedUser.phone,
-        kycStatus: updatedUser.kycStatus,
-        kycDocumentType: updatedUser.kycDocumentType,
-        walletAddress: updatedUser.walletAddress,
-      });
-    }
-
-    if (hasTokenUpdates) {
-      await updateFirestoreTokenState(currentUser.id, {
-        tokenBalance: updatedUser.tokenBalance,
-        streakDay: updatedUser.streakDay,
-        streakClaimedToday: updatedUser.streakClaimedToday,
-        lastPredictionDate: updatedUser.lastPredictionDate || undefined,
-        gamingCycleWeek: updatedUser.gamingCycleWeek,
-        referralCount: updatedUser.referralCount,
-      });
-    }
-  }
-
-  return updatedUser;
+export async function syncUserUpdate(currentUser: UserProfile, updates: Partial<UserProfile>): Promise<UserProfile> {
+  if (!auth.currentUser || auth.currentUser.uid !== currentUser.id) throw new Error('Sign in again');
+  await updateFirestoreProfileDetails(currentUser.id, updates);
+  const profile = await fetchFirestoreUserProfile(currentUser.id);
+  if (!profile) throw new Error('Profile unavailable');
+  setActiveSessionUser(profile); return profile;
 }
 
 export async function logoutCurrentUser(): Promise<void> {
@@ -786,13 +671,8 @@ export async function deleteCurrentUserAccount(params: DeleteAccountParams): Pro
         await reauthenticateWithCredential(fbUser, credential);
       }
 
-      // Delete Firestore documents first while auth token is still valid
-      if (fbUser.emailVerified) {
-        await deleteFirestoreUserProfile(fbUser.uid);
-      }
-
-      // Delete Firebase Auth user record
-      await deleteUser(fbUser);
+      await deleteFirestoreUserProfile(fbUser.uid);
+      await firebaseSignOut(auth);
     } catch (err: unknown) {
       const mapped = mapFirebaseAuthError(err);
       return {
@@ -801,23 +681,7 @@ export async function deleteCurrentUserAccount(params: DeleteAccountParams): Pro
       };
     }
   } else {
-    // Local / Demo account password verification
-    const accounts = getRegisteredAccounts();
-    const acc = accounts[user.id];
-    if (acc && acc.authProvider === 'email') {
-      if (!password) {
-        return {
-          success: false,
-          error: 'Please enter your current password to verify account deletion.',
-        };
-      }
-      if (acc.passwordHash !== hashPassword(password)) {
-        return {
-          success: false,
-          error: 'Incorrect password. Account deletion could not be verified.',
-        };
-      }
-    }
+    return { success: false, error: 'Sign in again to delete your account.' };
   }
 
   // Step 3: Remove from local storage and clear session
