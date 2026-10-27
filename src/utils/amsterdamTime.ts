@@ -32,7 +32,7 @@ export function getAmsterdamClockDetails(customDate?: Date): AmsterdamClockDetai
     hour: '2-digit',
     minute: '2-digit',
     second: '2-digit',
-    hour12: false,
+    hourCycle: 'h23',
     weekday: 'short',
   });
 
@@ -124,7 +124,8 @@ export function formatDuration(totalSeconds: number): string {
 /**
  * Format currency strictly to two decimal places
  */
-export function formatUSD(amount: number): string {
+export function formatUSD(amount: number | null): string {
+  if (amount === null || !Number.isFinite(amount)) return 'Awaiting settlement';
   return new Intl.NumberFormat('en-US', {
     style: 'currency',
     currency: 'USD',

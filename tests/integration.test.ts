@@ -1,0 +1,95 @@
+import test, { before, after } from 'node:test';
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { initializeApp, deleteApp } from 'firebase-admin/app';
+import { getFirestore } from 'firebase-admin/firestore';
+import { initializeTestEnvironment, assertFails } from '@firebase/rules-unit-testing';
+import { doc, setDoc, getDoc, updateDoc } from 'firebase/firestore';
+import { GameService } from '../server/gameService.ts';
+import { atAmsterdam, newRound } from '../server/domain.ts';
+
+if (!process.env.FIRESTORE_EMULATOR_HOST) throw new Error('Integration tests require the emulator; never run against a live project.');
+const projectId = 'demo-prediction-game';
+const admin = initializeApp({projectId}, 'tests');
+const db = getFirestore(admin);
+let clock = atAmsterdam('2026-10-27',11);
+const game = new GameService(db, () => clock);
+let env: Awaited<ReturnType<typeof initializeTestEnvironment>>;
+before(async()=>{ env=await initializeTestEnvironment({projectId,firestore:{rules:readFileSync('firestore.rules','utf8')}}); await env.clearFirestore(); });
+after(async()=>{ await env.cleanup(); await db.terminate(); await deleteApp(admin); });
+const register = (uid:string)=>game.register(uid, uid+'@example.com',{username:uid,firstName:'Test',lastName:'User',phone:'+31612345678'});
+
+test('direct clients cannot mint tokens, self-verify, read guesses or submit writes',async()=>{
+  await register('security');
+  const client=env.authenticatedContext('security',{email_verified:true}).firestore();
+  await assertFails(updateDoc(doc(client,'users/security'),{tokenBalance:10000}));
+  await assertFails(updateDoc(doc(client,'users/security'),{kycStatus:'VERIFIED'}));
+  await assertFails(setDoc(doc(client,'predictions/fake'),{userId:'security',priceCents:6400000}));
+  await assertFails(getDoc(doc(client,'predictions/fake')));
+  await assertFails(getDoc(doc(client,'rounds/round_20261027')));
+  const stranger=env.authenticatedContext('stranger',{email_verified:true}).firestore();
+  await assertFails(getDoc(doc(stranger,'users/security')));
+});
+test('concurrent submissions cannot overspend; retries cannot duplicate or change entries',async()=>{
+  await register('concurrent');
+  const id=await game.createRound('2026-10-27',3000000);
+  clock=atAmsterdam('2026-10-27',13);
+  await db.doc('users/concurrent').update({tokenBalance:1,lastPredictionDate:'2026-10-27'});
+  const results=await Promise.allSettled([game.submit('concurrent',id,64000,'request-0000000001'),game.submit('concurrent',id,64001,'request-0000000002')]);
+  assert.equal(results.filter(r=>r.status==='fulfilled').length,1);
+  assert.equal((await game.profile('concurrent'))!.tokenBalance,0);
+  const index=results.findIndex(r=>r.status==='fulfilled');
+  const retry=await game.submit('concurrent',id,64000+index,'request-000000000'+(index+1));
+  assert.equal(retry.user.tokenBalance,0);
+  await assert.rejects(()=>game.submit('concurrent',id,65000,'request-000000000'+(index+1)),/already used/);
+  const snapshot=await game.snapshot(id);
+  assert.equal(snapshot.entries.length,1); assert.equal(snapshot.entries[0].predictedPrice,null);
+  assert.equal((await game.snapshot(id,'concurrent')).entries[0].predictedPrice,64000+index);
+  clock=atAmsterdam('2026-10-27',20);
+  await assert.rejects(()=>game.submit('concurrent',id,64000,'request-0000000003'),/closed/);
+});
+test('server freeze is persisted once; publication gate and audit hash are reproducible',async()=>{
+  const id='round_20261027',lock=atAmsterdam('2026-10-27',20);
+  clock=lock;
+  let calls=0;
+  game.quotes=async()=>{ calls++;return ['Coinbase','Kraken','Bitstamp'].map((exchange,i)=>({exchange,pair:'BTC/USD' as const,priceCents:6400000+i,observedAt:lock+100,latencyMs:100})); };
+  await Promise.all([game.freeze(id),game.freeze(id)]);
+  assert.equal(calls,1);
+  let snapshot=await game.snapshot(id);
+  assert.equal(snapshot.round.officialPriceCents,6400001);
+  assert.notEqual(snapshot.entries[0].predictedPrice,null);
+  assert.equal(snapshot.results.length,0);
+  await game.publish(id); assert.equal((await game.snapshot(id)).results.length,0);
+  await assert.rejects(()=>game.audit(id),/not published/);
+  clock=atAmsterdam('2026-10-27',22);
+  await game.publish(id); snapshot=await game.snapshot(id);
+  assert.equal(snapshot.results.length,1);
+  const audit=await game.audit(id);
+  assert.equal(createHash('sha256').update(JSON.stringify(audit)).digest('hex'),snapshot.round.auditHash);
+  await game.publish(id); assert.deepEqual((await game.snapshot(id)).results,snapshot.results);
+});
+test('late worker suspends instead of replacing the deadline price',async()=>{
+  const round=newRound('2026-10-28',10000); await db.doc('rounds/'+round.id).create(round);
+  clock=round.lockAt+1001; await game.freeze(round.id);
+  assert.equal((await game.snapshot(round.id)).round.status,'SUSPENDED');
+});
+test('claims are idempotent per date, weekly reset applies before spending, KYC remains pending',async()=>{
+  clock=atAmsterdam('2026-10-28',12); await register('rewards');
+  clock=atAmsterdam('2026-10-29',12);
+  const results=await Promise.allSettled([game.claim('rewards'),game.claim('rewards')]);
+  assert.equal(results.filter(r=>r.status==='fulfilled').length,1);
+  assert.equal((await game.profile('rewards'))!.tokenBalance,7);
+  clock=atAmsterdam('2026-11-02',0);
+  assert.equal((await game.profile('rewards'))!.tokenBalance,0);
+  await assert.rejects(()=>game.updateProfile('rewards',{kycStatus:'VERIFIED'}),/Protected/);
+  assert.equal((await game.kyc('rewards',{kycDocumentType:'Passport',walletAddress:'Example destination'}))!.kycStatus,'PENDING');
+});
+test('chat enforces rate limits and persists reports and blocks',async()=>{
+  clock=atAmsterdam('2026-11-02',12);await register('chatter');await register('reader');
+  await assert.rejects(()=>game.sendChat('chatter','round_20261027','https://spam.example'),/Links/);
+  const msg=await game.sendChat('chatter','round_20261027','hello');
+  await assert.rejects(()=>game.sendChat('chatter','round_20261027','again'),/three seconds/);
+  await game.report('reader',msg.id);assert.equal((await db.doc('moderationReports/reader_'+msg.id).get()).get('status'),'OPEN');
+  await game.block('reader','chatter');assert.equal((await game.chat('round_20261027','reader')).length,0);
+});

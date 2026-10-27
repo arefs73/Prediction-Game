@@ -24,7 +24,7 @@ interface UserProfileModalProps {
   isOpen: boolean;
   onClose: () => void;
   user: UserProfile;
-  onUpdateUser: (updated: Partial<UserProfile>) => void;
+  onUpdateUser: (updated: Partial<UserProfile>) => Promise<void>;
   onClaimDailyTokens: () => void;
   onLogout: () => void;
   onAccountDeleted: (deletedUsername: string) => void;
@@ -89,15 +89,9 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
     auth.currentUser.providerData.some((p) => p.providerId === 'google.com') &&
     !auth.currentUser.providerData.some((p) => p.providerId === 'password');
 
-  const referralLink = `https://apexpredict.io/ref/${user.referralCode}`;
 
-  const copyReferral = () => {
-    navigator.clipboard.writeText(referralLink);
-    setCopiedReferral(true);
-    setTimeout(() => setCopiedReferral(false), 3000);
-  };
 
-  const handleSaveProfileEdit = (e: React.FormEvent) => {
+  const handleSaveProfileEdit = async (e: React.FormEvent) => {
     e.preventDefault();
     setProfileFeedback(null);
 
@@ -110,13 +104,14 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
       return;
     }
 
-    onUpdateUser({
+    try { await onUpdateUser({
       username: cleanUser,
       firstName: editFirstName.trim() || user.firstName,
       lastName: editLastName.trim() || user.lastName,
       phone: editPhone.trim() || user.phone,
     });
 
+    } catch (e) { setProfileFeedback({ type: 'error', text: (e as Error).message }); return; }
     setIsEditingProfile(false);
     setProfileFeedback({ type: 'success', text: 'Account profile details saved.' });
     setTimeout(() => setProfileFeedback(null), 4000);
@@ -143,13 +138,13 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
     setPwdFeedback({ type: 'success', text: 'Your password has been updated.' });
   };
 
-  const handleKycSubmit = (e: React.FormEvent) => {
+  const handleKycSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    onUpdateUser({
-      kycStatus: 'VERIFIED',
+    try { await onUpdateUser({
+      kycStatus: 'PENDING',
       kycDocumentType: kycDoc,
       walletAddress: walletAddr,
-    });
+    }); } catch (e) { setProfileFeedback({ type: 'error', text: (e as Error).message }); }
   };
 
   const openDeleteVerificationDialog = () => {
@@ -269,7 +264,7 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
                 : 'text-slate-400 hover:text-slate-200'
             }`}
           >
-            Referrals (+5 Tokens)
+            Referrals (not active)
           </button>
           <button
             onClick={() => setActiveTab('kyc')}
@@ -446,7 +441,7 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
               <div className="p-3.5 rounded-xl bg-gradient-to-r from-amber-500/10 via-slate-950 to-slate-950 border border-amber-500/30 flex items-center justify-between">
                 <div>
                   <div className="font-bold text-amber-300">Daily Base Reward (Section 4)</div>
-                  <div className="text-[11px] text-slate-400">+2 Free Tokens credited every 24 hours</div>
+                  <div className="text-[11px] text-slate-400">+2 tokens once per Amsterdam calendar day after signup day</div>
                 </div>
                 <button
                   onClick={onClaimDailyTokens}
@@ -623,46 +618,7 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
             </div>
           )}
 
-          {/* TAB 4: Referrals (Section 23 & 24) */}
-          {activeTab === 'referrals' && (
-            <div className="space-y-4 text-xs">
-              <div className="p-4 bg-slate-950 rounded-xl border border-slate-800 space-y-3">
-                <div className="flex items-center justify-between">
-                  <span className="font-bold text-white flex items-center gap-1.5">
-                    <Users className="w-4 h-4 text-amber-400" />
-                    Referral Program (Section 23)
-                  </span>
-                  <span className="font-mono text-amber-400 font-bold">
-                    {user.referralCount} Verified Referrals
-                  </span>
-                </div>
-                <p className="text-slate-400 text-[11px] leading-relaxed">
-                  Earn <strong>5 Bonus Tokens</strong> for each invited trader. The referred person must complete account creation and submit at least one valid prediction (Section 23 & 24 anti-abuse rule).
-                </p>
-
-                <div className="flex items-center gap-2 pt-1">
-                  <input
-                    type="text"
-                    readOnly
-                    value={referralLink}
-                    className="flex-1 bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-xs font-mono text-slate-200"
-                  />
-                  <button
-                    onClick={copyReferral}
-                    className="px-4 py-2 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold text-xs flex items-center gap-1.5 cursor-pointer"
-                  >
-                    <Copy className="w-3.5 h-3.5" />
-                    <span>{copiedReferral ? 'Copied!' : 'Copy Link'}</span>
-                  </button>
-                </div>
-              </div>
-
-              <div className="p-3 rounded-xl bg-slate-950/80 border border-slate-800 text-[11px] text-slate-400">
-                <strong className="text-slate-300 block mb-1">Referral Fraud Protections (Section 24)</strong>
-                Unique verified email/phone checks, IP abuse monitoring, and mandatory participation prevent multi-accounting.
-              </div>
-            </div>
-          )}
+          {activeTab === 'referrals' && <p className="p-4 text-sm">Referral rewards are not active. Phone verification and abuse monitoring must be configured before this program opens.</p>}
 
           {/* TAB 5: Prize Claim KYC (Section 1) */}
           {activeTab === 'kyc' && (
@@ -691,7 +647,7 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
                 {user.kycStatus === 'VERIFIED' ? (
                   <div className="p-3 bg-emerald-950/40 border border-emerald-800/60 rounded-xl flex items-center gap-2 text-emerald-300">
                     <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-                    <span>Identity verified ({user.kycDocumentType || 'EU ID'}). Payout destination ({user.walletAddress || walletAddr}) active.</span>
+                    <span>Identity verified ({user.kycDocumentType || 'EU ID'}). Requested payout destination ({user.walletAddress || walletAddr}). Payment integration pending.</span>
                   </div>
                 ) : (
                   <form onSubmit={handleKycSubmit} className="space-y-3 pt-2">
@@ -726,7 +682,7 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
                       type="submit"
                       className="w-full py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs cursor-pointer transition-colors shadow-lg shadow-emerald-500/20"
                     >
-                      Complete KYC Identity Verification
+                      Submit verification request (manual review)
                     </button>
                   </form>
                 )}
@@ -823,7 +779,7 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
                       onChange={(e) => setDeletePassword(e.target.value)}
                       placeholder={
                         user.username === 'ArefS'
-                          ? 'Enter password (Demo: Demo@2026)'
+                          ? 'Enter your password'
                           : 'Enter your account password'
                       }
                       className="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-700 focus:border-rose-500 focus:outline-none text-white"

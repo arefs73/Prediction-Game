@@ -37,7 +37,7 @@ export const Header: React.FC<HeaderProps> = ({
               ApexPredict
             </div>
             <div className="text-[10px] font-mono text-cyan-400 font-medium tracking-wider">
-              BTC DAILY · 20:00 CEST
+              BTC DAILY · 20:00 Amsterdam
             </div>
           </div>
         </div>

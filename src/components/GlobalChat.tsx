@@ -1,3 +1,4 @@
+import { api } from '../services/firebase';
 import React, { useState, useRef, useEffect } from 'react';
 import { ChatMessage, UserProfile } from '../types/game';
 import { AlertCircle, Flag, LogIn, MessageSquare, Send, UserX } from 'lucide-react';
@@ -6,7 +7,7 @@ import { AuthModalMode } from './AuthModal';
 interface GlobalChatProps {
   messages: ChatMessage[];
   currentUser: UserProfile | null;
-  onSendMessage: (text: string) => { success: boolean; error?: string };
+  onSendMessage: (text: string) => Promise<{ success: boolean; error?: string }>;
   onOpenAuth: (mode: AuthModalMode) => void;
 }
 
@@ -28,7 +29,7 @@ export const GlobalChat: React.FC<GlobalChatProps> = ({
     }
   }, [messages]);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg(null);
 
@@ -51,7 +52,7 @@ export const GlobalChat: React.FC<GlobalChatProps> = ({
       return;
     }
 
-    const res = onSendMessage(trimmed);
+    const res = await onSendMessage(trimmed);
     if (res.success) {
       setInputText('');
     } else {
@@ -59,13 +60,9 @@ export const GlobalChat: React.FC<GlobalChatProps> = ({
     }
   };
 
-  const handleReport = (id: string) => {
-    setReportedMsgIds((prev) => [...prev, id]);
-  };
+  const handleReport = async (id: string) => { try { await api('/reports', 'POST', { messageId: id }); setReportedMsgIds(prev => [...prev, id]); } catch (e) { setErrorMsg((e as Error).message); } };
 
-  const handleBlock = (userId: string) => {
-    setBlockedUsers((prev) => [...prev, userId]);
-  };
+  const handleBlock = async (userId: string) => { try { await api('/blocks', 'POST', { userId }); setBlockedUsers(prev => [...prev, userId]); } catch (e) { setErrorMsg((e as Error).message); } };
 
   const visibleMessages = messages.filter((m) => !blockedUsers.includes(m.userId));
 
