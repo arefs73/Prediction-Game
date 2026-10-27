@@ -1,3 +1,4 @@
+import { createPortal } from 'react-dom';
 import React, { useState } from 'react';
 import { UserProfile } from '../types/game';
 import { AmsterdamClockDetails, formatUSD } from '../utils/amsterdamTime';
@@ -234,7 +235,7 @@ export const PredictionBox: React.FC<PredictionBoxProps> = ({
       </form>
 
       {/* Confirmation Screen per Game Rules Section 5 & 6 */}
-      {showConfirmModal && user && (
+      {showConfirmModal && user && createPortal(
         <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-slate-900 border border-slate-700 rounded-2xl max-w-md w-full p-6 shadow-2xl relative animate-in fade-in zoom-in-95 duration-150">
             <button
@@ -310,7 +311,7 @@ export const PredictionBox: React.FC<PredictionBoxProps> = ({
               </button>
             </div>
           </div>
-        </div>
+        </div>, document.body
       )}
     </div>
   );
